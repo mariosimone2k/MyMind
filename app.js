@@ -4,7 +4,7 @@
    L'app non effettua alcuna connessione di rete (vedi Content-Security-Policy in index.html). */
 'use strict';
 (() => {
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -602,7 +602,7 @@ function kidForm(k){
      <label class="fld"><span>Motivo dell'invio</span><textarea class="in" id="r" rows="2">${esc(v.reason)}</textarea></label>
      <label class="fld"><span>Diagnosi o ipotesi di lavoro</span><textarea class="in" id="dx" rows="2">${esc(v.dx)}</textarea></label>
      <h3 style="font-size:14.5px;margin:18px 0 10px">Genitori</h3>${v.parents.map(pr).join('<div style="height:10px"></div>')}`,
-    foot: `${isNew ? '' : `<button class="btn quiet sp" id="arc">${k.archived ? 'Riporta in carico' : 'Archivia percorso'}</button>`}<button class="btn" data-close>Annulla</button><button class="btn pri" id="ok">${isNew ? 'Crea scheda' : 'Salva'}</button>`,
+    foot: `${isNew ? '' : `<button class="btn quiet danger sp" id="delk">${ic('trash', 16)}Elimina</button><button class="btn quiet" id="arc">${k.archived ? 'Riporta in carico' : 'Archivia'}</button>`}<button class="btn" data-close>Annulla</button><button class="btn pri" id="ok">${isNew ? 'Crea scheda' : 'Salva'}</button>`,
     onOpen: ov => {
       $('#ok', ov).onclick = () => {
         const name = fval(ov, 'n'); if(!name){ toast('Inserisci almeno il nome'); return; }
@@ -613,7 +613,23 @@ function kidForm(k){
         if(isNew) log(`Nuova scheda: ${kname(t)}.`);
         save(); closeModal(); if(isNew) location.hash = `bambino/${t.id}`; else route(); toast(isNew ? 'Scheda creata' : 'Anagrafica aggiornata');
       };
+      const dk = $('#delk', ov); if(dk) dk.onclick = () => deleteKid(k);
       const a = $('#arc', ov); if(a) a.onclick = () => { k.archived = !k.archived; log(`${kname(k)}: percorso ${k.archived ? 'archiviato' : 'riaperto'}.`); save(); closeModal(); route(); toast(k.archived ? 'Percorso archiviato' : 'Bambino di nuovo in carico'); };
+    }});
+}
+
+function deleteKid(k){
+  const nS = sessOf(k.id).length, nN = notesOf(k.id).length;
+  modal({title: `Eliminare ${esc(kname(k))}?`, sub: 'Verranno cancellati la scheda, gli incontri e le note del diario. Non si può annullare.', width: 480,
+    body: `<div class="err" style="margin-bottom:14px">${nS} incontri e ${nN} note verranno eliminati.${nS ? ' Le prestazioni già svolte spariranno anche dai riepiloghi mensili.' : ''}</div>
+     <p style="margin:0 0 14px;color:var(--ink2);font-size:14px">Se il percorso è solo concluso, è meglio <b>archiviarlo</b>: resta consultabile e non compare tra i bambini in carico.</p>
+     <label class="fld"><span>Per confermare scrivi il nome: ${esc(k.name)}</span><input class="in" id="cn" autocomplete="off"></label>`,
+    foot: `<button class="btn" data-close>Annulla</button><button class="btn acc" id="ok">${ic('trash', 16)}Elimina definitivamente</button>`,
+    onOpen: ov => $('#ok', ov).onclick = () => {
+      if(norm($('#cn', ov).value) !== norm(k.name)){ toast(`Scrivi "${k.name}" per confermare`); return; }
+      const label = kname(k);
+      D.kids = D.kids.filter(x => x.id !== k.id); D.sessions = D.sessions.filter(x => x.kid !== k.id); D.notes = D.notes.filter(x => x.kid !== k.id);
+      log(`Scheda eliminata: ${label}.`); save(); closeModal(); location.hash = 'bambini'; route(); toast('Scheda eliminata');
     }});
 }
 
@@ -646,11 +662,12 @@ function vKid(arg){
     $('#ed').onclick = () => kidForm(k); const ag = $('#ag'); if(ag) ag.onclick = () => goalsForm(k);
   }
   if(tab === 'diario'){
-    T.innerHTML = `<div style="display:flex;justify-content:flex-end;margin:-6px 0 12px"><button class="btn sm" id="ia">${ic('import', 15)}Importa appunti esistenti</button></div><div class="card">${ns.length ? ns.slice().reverse().map(n => `<div class="entry"><div class="d">${fShort(n.date)}<small>${DL[parseIso(n.date).getDay()]}</small></div><div><h3>${esc(n.activity)}</h3><p>${esc(n.obs)}</p>${k.goals.length ? `<div class="scs">${k.goals.filter(g => n.scores[g.id] != null).map(g => `<span class="chip">${esc(g.label)} · ${fmtScore(n.scores[g.id])}</span>`).join('')}</div>` : ''}</div><div><button class="iconbtn" data-edn="${n.id}" aria-label="Modifica nota">${ic('edit', 16)}</button></div></div>`).join('')
+    T.innerHTML = `<div style="display:flex;justify-content:flex-end;gap:8px;margin:-6px 0 12px">${k.temp ? `<button class="btn sm quiet danger" id="delk3">${ic('trash', 15)}Elimina</button>` : ''}<button class="btn sm" id="ia">${ic('import', 15)}Importa appunti esistenti</button></div><div class="card">${ns.length ? ns.slice().reverse().map(n => `<div class="entry"><div class="d">${fShort(n.date)}<small>${DL[parseIso(n.date).getDay()]}</small></div><div><h3>${esc(n.activity)}</h3><p>${esc(n.obs)}</p>${k.goals.length ? `<div class="scs">${k.goals.filter(g => n.scores[g.id] != null).map(g => `<span class="chip">${esc(g.label)} · ${fmtScore(n.scores[g.id])}</span>`).join('')}</div>` : ''}</div><div><button class="iconbtn" data-edn="${n.id}" aria-label="Modifica nota">${ic('edit', 16)}</button></div></div>`).join('')
       : `<div class="empty">${ic('note', 32, 1.3)}<b>Il diario è vuoto</b>Dopo ogni incontro annota attività, osservazioni e valutazione degli obiettivi.<br><button class="btn pri" style="margin-top:14px" id="fn">${ic('plus', 16)}Scrivi la prima nota</button></div>`}</div>`;
     $$('[data-edn]').forEach(b => b.onclick = () => noteForm(k, D.notes.find(n => n.id === b.dataset.edn), null, () => vKid(id)));
     const fn = $('#fn'); if(fn) fn.onclick = () => noteForm(k, null, null, () => vKid(id));
     $('#ia').onclick = () => archiveImport(k.id);
+    const d3 = $('#delk3'); if(d3) d3.onclick = () => deleteKid(k);
   }
   if(tab === 'progressi'){
     T.innerHTML = `<div class="grid c2"><div class="card"><div class="ch"><h2>Andamento</h2><small>Scala da 1 a 5, una valutazione per nota</small></div>${k.goals.length && ns.length >= 2 ? `<div class="fig"><svg id="chart" role="img" aria-label="Grafico dell'andamento degli obiettivi"></svg></div><div class="legend">${k.goals.map((g, i) => `<span><i style="background:${goalColor(i)}"></i>${esc(g.label)}</span>`).join('')}</div>` : `<div class="empty">${ic('today', 30, 1.3)}<b>Ancora pochi dati</b>Il grafico compare dopo almeno due note con la valutazione degli obiettivi.</div>`}</div>
@@ -662,7 +679,10 @@ function vKid(arg){
   if(tab === 'anagrafica'){
     T.innerHTML = `<div class="grid c2e"><div class="card"><div class="ch"><h2>Anagrafica</h2><div class="acts"><button class="btn sm" id="ed">${ic('edit', 15)}Modifica</button></div></div><dl class="kv"><dt>Nome</dt><dd>${esc(k.name)} ${esc(k.surname)}</dd><dt>Data di nascita</dt><dd>${k.birth ? fFull(k.birth) + ` (${ageOf(k.birth)} anni)` : '—'}</dd><dt>Scuola</dt><dd>${esc(k.school) || '—'}</dd><dt>In carico dal</dt><dd>${k.since ? fFull(k.since) : '—'}</dd></dl></div>
      <div class="card"><div class="ch"><h2>Genitori e consenso informato</h2></div>${k.parents.map((p, i) => `<div class="parent"><div><b>${esc(p.name) || `<span style="color:var(--mute)">Genitore ${i + 1} non indicato</span>`}</b> <span style="color:var(--mute)">· ${esc(p.role)}</span><small class="num">${[p.phone, p.email].filter(Boolean).map(esc).join(' · ') || '—'}</small></div>${p.consent ? `<span class="chip ok">${ic('check', 13, 2.5)}Firmato${p.cdate ? ' il ' + fShort(p.cdate) : ''}</span>` : `<button class="btn sm" data-sign="${i}" ${p.name ? '' : 'disabled'}>${ic('sign', 15)}Registra firma</button>`}</div>`).join('')}
-      <p style="color:var(--mute);font-size:13px;margin:14px 0 0">Per i minori serve il consenso informato di chi esercita la responsabilità genitoriale, di norma entrambi i genitori.</p></div></div>`;
+      <p style="color:var(--mute);font-size:13px;margin:14px 0 0">Per i minori serve il consenso informato di chi esercita la responsabilità genitoriale, di norma entrambi i genitori.</p></div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:18px"><button class="btn quiet" id="arck">${k.archived ? 'Riporta in carico' : 'Archivia percorso'}</button><button class="btn quiet danger" id="delk2">${ic('trash', 16)}Elimina scheda</button></div>`;
+    $('#delk2').onclick = () => deleteKid(k);
+    $('#arck').onclick = () => { k.archived = !k.archived; log(`${kname(k)}: percorso ${k.archived ? 'archiviato' : 'riaperto'}.`); save(); vKid(id); toast(k.archived ? 'Percorso archiviato' : 'Bambino di nuovo in carico'); };
     $('#ed').onclick = () => kidForm(k);
     $$('[data-sign]').forEach(b => b.onclick = () => { const p = k.parents[+b.dataset.sign]; p.consent = true; p.cdate = today(); log(`Consenso di ${p.name} registrato (${kname(k)}).`); save(); vKid(id); toast('Consenso registrato'); });
   }
