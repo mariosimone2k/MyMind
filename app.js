@@ -4,7 +4,7 @@
    L'app non effettua alcuna connessione di rete (vedi Content-Security-Policy in index.html). */
 'use strict';
 (() => {
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1300,7 +1300,7 @@ async function backupNow(){
   const isTouch = matchMedia('(pointer:coarse)').matches;
   let ok = false;
   if(isTouch && navigator.canShare && navigator.canShare({files: [file]})){
-    try { await navigator.share({files: [file], title: 'Backup MyMind'}); ok = true; } catch(e){ if(e.name === 'AbortError') return; }
+    try { await navigator.share({files: [file]}); ok = true; } catch(e){ if(e.name === 'AbortError') return; }
   }
   if(!ok){ download(file.name, file); ok = true; }
   D.settings.lastBackup = Date.now(); D.settings.snooze = 0; log('Backup cifrato salvato.'); await persist(); paintBackupBox();
