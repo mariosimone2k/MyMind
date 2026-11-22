@@ -446,3 +446,19 @@ dl.kv dd{margin:0;white-space:pre-line}
 @media(prefers-reduced-motion:reduce){.draw{stroke-dashoffset:0}}
 
 .drawn .draw{animation:none;stroke-dashoffset:0}.drawn .pop{animation:none}
+
+/* ---------- fix mobile ---------- */
+.tabs button,.seg button,.daychips button,.btn,.chip,.iconbtn{flex-shrink:0}
+.tabs{-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+.tabs button{scroll-snap-align:start}
+.kh .av{box-shadow:0 0 0 4px color-mix(in srgb,var(--paper) 70%,transparent)}
+@media(max-width:760px){
+ .nav a.on::before{display:none}
+ .kh{padding:18px;gap:14px}
+ .kh .acts .btn{flex:1 1 auto}
+ .toolbar .seg{overflow-x:auto;max-width:100%}
+ .ph .acts{width:100%}
+ .wkbar{margin-right:auto}
+}
+.kh .av{background:var(--paper)!important}
+.empty .btn svg{display:inline;margin:0;color:currentColor}

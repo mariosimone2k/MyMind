@@ -4,7 +4,7 @@
    L'app non effettua alcuna connessione di rete (vedi Content-Security-Policy in index.html). */
 'use strict';
 (() => {
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -131,7 +131,7 @@ const idb = (() => {
 })();
 
 /* ============ data model ============ */
-const TYPES = ['Seduta', 'Psicoterapia', 'Primo incontro', 'Colloquio clinico', 'Valutazione', 'Somministrazione test', 'Colloquio genitori', 'Restituzione'];
+const TYPES = ['Seduta', 'Psicoterapia', 'Primo incontro', 'Colloquio clinico', 'Valutazione', 'Somministrazione test', 'Colloquio genitori', 'Restituzione', 'Sostituzione'];
 const blank = () => ({
   schema: 1,
   settings: {name: '', title: 'Psicologa e psicoterapeuta', place: '', fee: 30, contrib: 2, bollo: true, duration: 50, autolock: 10, masked: false, remind: 7, lastBackup: 0, rooms: 'Stanza 1, Stanza 2, Stanza 3, Stanza 4'},
@@ -348,7 +348,7 @@ function vToday(){
   const wk = D.sessions.filter(s => s.date >= wk0 && s.date <= wk1 && s.status !== 'annullata');
   const toConfirm = D.sessions.filter(s => s.status === 'programmata' && (s.date < t || (s.date === t && tmin(s.start) + (s.duration || 50) < nowMin())));
   const noNote = D.sessions.filter(s => isDone(s) && s.type !== 'Colloquio genitori' && s.date >= iso(addDays(new Date(), -14)) && !D.notes.some(n => n.kid === s.kid && n.date === s.date));
-  const consents = D.kids.filter(k => !k.archived && k.parents.some(p => p.name && !p.consent));
+  const consents = D.kids.filter(k => !k.archived && !k.temp && k.parents.some(p => p.name && !p.consent));
   const todos = [];
   if(toConfirm.length) todos.push(`<button data-go="confirm"><span class="ti warn">${ic('check', 18)}</span><span><b>${toConfirm.length} ${toConfirm.length === 1 ? 'incontro da confermare' : 'incontri da confermare'}</b><small>Segna se si sono svolti: le prestazioni si contano da qui</small></span>${ic('right', 16)}</button>`);
   if(backupLate()) todos.push(`<button data-go="backup"><span class="ti warn">${ic('cloud', 18)}</span><span><b>Fai il backup</b><small>Ultimo: ${ago(st.lastBackup)}. Salvalo su iCloud Drive o Google Drive</small></span>${ic('right', 16)}</button>`);
@@ -360,7 +360,7 @@ function vToday(){
    <div class="card stat"><div class="v num">${todays.filter(s => s.status !== 'annullata').length}</div><div class="l">Incontri oggi</div></div>
    <div class="card stat"><div class="v num">${wk.length}</div><div class="l">Incontri questa settimana</div></div>
    <div class="card stat"><div class="v num">${mDone}</div><div class="l">Prestazioni a ${MN[new Date().getMonth()]}</div><div class="d">${cap(MN[(new Date().getMonth() + 11) % 12])}: <b>${pDone}</b></div></div>
-   <div class="card stat"><div class="v num">${D.kids.filter(k => !k.archived).length}</div><div class="l">Bambini seguiti</div></div></div>
+   <div class="card stat"><div class="v num">${D.kids.filter(k => !k.archived && !k.temp).length}</div><div class="l">Bambini seguiti</div></div></div>
   <div class="grid c2"><div class="card"><div class="ch"><h2>Oggi</h2><small>Segna com'è andato ogni incontro</small></div>
    ${todays.length ? `<div class="tline">${todays.map(s => tlItem(s)).join('')}</div>` : `<div class="empty">${ic('today', 30, 1.4)}<b>Giornata libera</b>Nessun incontro in agenda per oggi.</div>`}</div>
    <div class="grid" style="align-content:start"><div class="card"><div class="ch"><h2>Da fare</h2></div>${todos.length ? `<div class="todo">${todos.join('')}</div>` : `<div class="empty" style="padding:14px">${ic('check', 26, 1.4)}<b>Tutto in ordine</b>Non ci sono attività in sospeso.</div>`}</div>
@@ -372,7 +372,7 @@ function tlItem(s){
   const k = kidById(s.kid); const done = s.status === 'svolta';
   const hasNote = D.notes.some(n => n.kid === s.kid && n.date === s.date);
   return `<div class="tl-it ${done ? 'done' : ''}" style="color:var(--k${k.tint % 8})"><div class="tl-t num" style="color:var(--ink)">${s.start}<small>${esc(s.room || '')}</small></div><span class="tl-dot"></span>
-   <div class="tl-p" style="color:var(--ink)"><a href="#bambino/${k.id}">${esc(kname(k))}</a><small>${esc(s.type)}${k.birth ? ` · ${ageOf(k.birth)} anni` : ''}</small>${done && s.type !== 'Colloquio genitori' ? `<div class="nn">${hasNote ? '<span class="chip ok">Nota scritta</span>' : `<button class="btn sm" data-note="${s.id}">${ic('note', 15)}Scrivi la nota</button>`}</div>` : ''}</div>
+   <div class="tl-p" style="color:var(--ink)"><a href="#bambino/${k.id}">${esc(kname(k))}</a>${k.temp ? ' <span class="chip warn" style="margin-left:4px">Sostituzione</span>' : ''}<small>${esc(s.type)}${k.temp && k.colleague ? ' · per ' + esc(k.colleague) : ''}${k.birth ? ` · ${ageOf(k.birth)} anni` : ''}</small>${done && s.type !== 'Colloquio genitori' ? `<div class="nn">${hasNote ? '<span class="chip ok">Nota scritta</span>' : `<button class="btn sm" data-note="${s.id}">${ic('note', 15)}Scrivi la nota</button>`}</div>` : ''}</div>
    ${statusSeg(s)}</div>`;
 }
 const statusSeg = s => `<div class="seg" role="group" aria-label="Esito dell'incontro">${[['svolta', 'Svolta', 'ok'], ['assente', 'Assente', 'no'], ['programmata', 'Da fare', '']].map(([v, l, c]) => `<button data-st="${v}" data-id="${s.id}" class="${s.status === v ? 'on ' + c : ''}">${l}</button>`).join('')}</div>`;
@@ -416,7 +416,7 @@ function vAgenda(arg){
    <div class="cal-b" id="calb"><div class="cal-hours">${Array.from({length: h1 - h0}, (_, i) => `<div class="num">${pad(h0 + i)}:00</div>`).join('')}</div>
    ${days.map(d => `<div class="cal-col ${d === t ? 'tod' : ''}" style="height:${(h1 - h0) * HH}px">${d === t && nowTop != null ? `<div class="nowline" style="top:${nowTop}px"></div>` : ''}${evs.filter(e => e.date === d).map(ev).join('')}</div>`).join('')}</div></div>
   <div class="daylist"><div class="daychips">${days.map(d => { const dd = parseIso(d); return `<button data-day="${d}" class="${d === mobileDay ? 'on' : ''}">${DS[dd.getDay()]}<b class="num">${dd.getDate()}</b></button>`; }).join('')}</div>
-   ${(l => l.length ? l.map(e => { const k = kidById(e.kid); return `<button class="dl-ev st-${e.status}" data-ev="${e.id}" style="border-left-color:var(--k${k.tint % 8})"><b class="num">${e.start}</b><span><b>${esc(kname(k))}</b><small>${esc(e.type)} · ${esc(e.room || '')}${e.status !== 'programmata' ? ' · ' + e.status : ''}</small></span></button>`; }).join('') : `<div class="empty">${ic('cal', 28, 1.4)}<b>Nessun incontro</b>${cap(fLong(mobileDay))}</div>`)(evs.filter(e => e.date === mobileDay).sort((a, b) => a.start.localeCompare(b.start)))}</div>`;
+   ${(l => l.length ? l.map(e => { const k = kidById(e.kid); return `<button class="dl-ev st-${e.status}" data-ev="${e.id}" style="border-left-color:var(--k${k.tint % 8})"><b class="num">${e.start}</b><span><b>${esc(kname(k))}</b><small>${[e.type, e.room, e.status !== 'programmata' ? e.status : ''].filter(Boolean).map(esc).join(' · ')}</small></span></button>`; }).join('') : `<div class="empty">${ic('cal', 28, 1.4)}<b>Nessun incontro</b>${cap(fLong(mobileDay))}</div>`)(evs.filter(e => e.date === mobileDay).sort((a, b) => a.start.localeCompare(b.start)))}</div>`;
   const cb = $('#calb'); if(cb){ const first = evs.length ? Math.min(...evs.map(e => tmin(e.start))) : 14 * 60; cb.scrollTop = Math.max(0, top(first) - 40); }
   $('#wp').onclick = () => { wkStart = iso(addDays(ws, -7)); vAgenda(); };
   $('#wf').onclick = () => { wkStart = iso(addDays(ws, 7)); vAgenda(); };
@@ -443,12 +443,17 @@ function sessionForm(s, date, kidId){
   if(!kids.length){ toast('Aggiungi prima un bambino'); location.hash = 'bambini'; return; }
   const rooms = D.settings.rooms.split(',').map(r => r.trim()).filter(Boolean);
   modal({title: isNew ? 'Nuovo incontro' : 'Modifica incontro', width: 560,
-    body: `<label class="fld"><span>Bambino</span><select class="in" id="k">${kids.map(k => `<option value="${k.id}" ${k.id === s.kid ? 'selected' : ''}>${esc(kname(k))}</option>`).join('')}</select></label>
+    body: `<label class="fld"><span>Bambino</span><select class="in" id="k">${isNew ? '<option value="__sub">Sostituzione: bambino di una collega…</option>' : ''}${kids.filter(k => !k.temp || k.id === s.kid).map(k => `<option value="${k.id}" ${k.id === s.kid ? 'selected' : ''}>${esc(kname(k))}</option>`).join('')}${kids.some(k => k.temp && k.id !== s.kid) ? `<optgroup label="Già visti in sostituzione">${kids.filter(k => k.temp && k.id !== s.kid).map(k => `<option value="${k.id}">${esc(kname(k))}${k.colleague ? ' · ' + esc(k.colleague) : ''}</option>`).join('')}</optgroup>` : ''}</select></label>
+     <div id="subf" class="hide" style="background:var(--soft);border-radius:12px;padding:14px 14px 2px;margin-bottom:14px"><div class="row2"><label class="fld"><span>Nome del bambino</span><input class="in" id="sn" autocomplete="off"></label><label class="fld"><span>Iniziale del cognome</span><input class="in" id="ss" maxlength="20" autocomplete="off"></label></div><label class="fld"><span>Collega che sostituisci</span><input class="in" id="sc" placeholder="Es. Dott.ssa Rossi"></label><small style="display:block;color:var(--mute);margin:-6px 0 12px">Il bambino non entra tra quelli in carico: lo trovi in Bambini → Sostituzioni.</small></div>
      <div class="row3"><label class="fld"><span>Data</span><input class="in" type="date" id="d" value="${s.date}"></label><label class="fld"><span>Ora</span><input class="in" type="time" id="t" value="${s.start}" step="300"></label><label class="fld"><span>Durata (min)</span><input class="in" type="number" id="du" min="10" max="240" step="5" value="${s.duration || 50}"></label></div>
      <div class="row2"><label class="fld"><span>Tipo</span><select class="in" id="ty">${TYPES.map(x => `<option ${x === s.type ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label class="fld"><span>Stanza</span><input class="in" id="ro" list="rooms" value="${esc(s.room)}"><datalist id="rooms">${rooms.map(r => `<option value="${esc(r)}">`).join('')}</datalist></label></div>
      ${isNew ? `<label class="check"><input type="checkbox" id="rep"><span>Ripeti ogni settimana per <input class="in" type="number" id="repn" value="8" min="2" max="52" style="width:76px;display:inline-block;padding:4px 8px;margin:0 4px"> settimane</span></label>` : ''}`,
     foot: `<button class="btn" data-close>Annulla</button><button class="btn pri" id="ok">${isNew ? 'Aggiungi' : 'Salva'}</button>`,
-    onOpen: ov => $('#ok', ov).onclick = () => {
+    onOpen: ov => { const ks = $('#k', ov); if(isNew && ks.value === '__sub' && kids.some(k => !k.temp)) ks.value = (kids.find(k => k.id === s.kid) || kids.find(k => !k.temp)).id;
+      const syncSub = () => { const on = ks.value === '__sub'; $('#subf', ov).classList.toggle('hide', !on); if(on) $('#ty', ov).value = 'Sostituzione'; else if($('#ty', ov).value === 'Sostituzione' && !(kidById(ks.value) || {}).temp) $('#ty', ov).value = 'Seduta'; if(!on && (kidById(ks.value) || {}).temp) $('#ty', ov).value = 'Sostituzione'; };
+      ks.onchange = syncSub; syncSub();
+      $('#ok', ov).onclick = () => {
+      if(ks.value === '__sub'){ const n = fval(ov, 'sn'); if(!n){ toast('Scrivi il nome del bambino'); return; } const t = newKid({name: cap(n), surname: fval(ov, 'ss'), reason: ''}); t.temp = true; t.colleague = fval(ov, 'sc'); ks.insertAdjacentHTML('beforeend', `<option value="${t.id}"></option>`); ks.value = t.id; log(`Sostituzione: ${kname(t)}${t.colleague ? ' (per ' + t.colleague + ')' : ''}.`); }
       const v = {kid: fval(ov, 'k'), date: fval(ov, 'd'), start: fval(ov, 't'), duration: +fval(ov, 'du') || 50, type: fval(ov, 'ty'), room: fval(ov, 'ro')};
       if(!v.date || !/^\d{2}:\d{2}$/.test(v.start)){ toast('Controlla data e ora'); return; }
       if(isNew){ const reps = $('#rep', ov).checked ? Math.min(52, Math.max(2, +$('#repn', ov).value || 8)) : 1;
@@ -456,7 +461,7 @@ function sessionForm(s, date, kidId){
         log(`Aggiunt${reps > 1 ? 'i ' + reps + ' incontri' : 'o un incontro'} per ${kname(kidById(v.kid))}.`);
       } else Object.assign(s, v);
       save(); closeModal(); wkStart = iso(monday(parseIso(v.date))); if(location.hash.startsWith('#agenda')) vAgenda(); else route(); toast(isNew ? 'Incontro aggiunto' : 'Incontro aggiornato');
-    }});
+    }; }});
 }
 
 /* ============ import palinsesto ============ */
@@ -493,8 +498,12 @@ function parseRows(rows, refMonday){
     const ageM = nameCell.match(/(\d{1,2})\s*anni/i);
     let name = nameCell.replace(/\(?\d{1,2}\s*anni\)?/i, '').replace(/\b(genitori di|colloquio genitori|genitori)\b/ig, '').replace(/[,;()]/g, ' ').replace(/\s+/g, ' ').trim();
     if(/genitori/i.test(nameCell)) type = 'Colloquio genitori';
-    const parts = name.split(' ');
-    out.push({date, start, duration, room: roomM ? cap(roomM[0].trim()) : '', type, first: parts[0] || '', last: parts.slice(1).join(' '), age: ageM ? +ageM[1] : null});
+    const subM = line.match(/sostitu\w*|\bsost\.?\b/i);
+    let colleague = '';
+    if(subM){ type = 'Sostituzione'; const cm = line.slice(subM.index).match(/(?:sostitu\w*|sost\.?)\s*(?:di|per|:)?\s*((?:dott\.?(?:ssa)?|dr\.?(?:ssa)?)\s*[A-ZÀ-Ü][\wà-ü']+(?:\s+[A-ZÀ-Ü][\wà-ü']+)?)/i); if(cm) colleague = cm[1].replace(/\s+/g, ' ').trim(); }
+    name = name.replace(/\b(sostitu\w*|sost\.?)\b.*$/i, '').trim();
+    const parts = name.split(' ').filter(Boolean);
+    out.push({date, start, duration, room: roomM ? cap(roomM[0].trim()) : '', type, colleague, first: parts[0] || '', last: parts.slice(1).join(' '), age: ageM ? +ageM[1] : null});
   }
   return out.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
 }
@@ -539,7 +548,7 @@ function importDialog(){
         const cnt = x => plan.filter(p => p.kind === x).length;
         res.innerHTML = `<div class="diffs"><div><b class="num">${rows.length}</b>incontri</div><div><b class="num" style="color:var(--ok)">${cnt('new')}</b>nuovi</div><div><b class="num" style="color:var(--accink)">${cnt('moved')}</b>spostati</div><div><b class="num">${gone.length}</b>non più presenti</div></div>
          <p style="margin:0 0 10px;color:var(--mute);font-size:13.5px">Settimana dal ${fShort(w0)} al ${fShort(w1)}</p>
-         ${cnt('new') ? `<h4 style="margin:0 0 6px">Nuovi</h4><ul class="dlist">${plan.filter(p => p.kind === 'new').map((p, i) => `<li><span class="chip ok">Nuovo</span><span>${esc(p.r.first)} ${esc(p.r.last)} · ${fLong(p.r.date)}, ${p.r.start}<br><small style="color:var(--mute)">${esc(p.r.type)}${p.r.room ? ' · ' + esc(p.r.room) : ''}</small></span>${p.create ? `<label style="font-size:12.5px;display:flex;gap:6px;align-items:center"><input type="checkbox" checked data-create="${plan.indexOf(p)}">crea scheda</label>` : ''}</li>`).join('')}</ul>` : ''}
+         ${cnt('new') ? `<h4 style="margin:0 0 6px">Nuovi</h4><ul class="dlist">${plan.filter(p => p.kind === 'new').map((p, i) => `<li><span class="chip ${p.r.type === 'Sostituzione' ? 'warn' : 'ok'}">${p.r.type === 'Sostituzione' ? 'Sostituzione' : 'Nuovo'}</span><span>${esc(p.r.first)} ${esc(p.r.last)}${p.r.colleague ? ' · per ' + esc(p.r.colleague) : ''} · ${fLong(p.r.date)}, ${p.r.start}<br><small style="color:var(--mute)">${esc(p.r.type)}${p.r.room ? ' · ' + esc(p.r.room) : ''}</small></span>${p.create ? `<label style="font-size:12.5px;display:flex;gap:6px;align-items:center"><input type="checkbox" checked data-create="${plan.indexOf(p)}">${p.r.type === 'Sostituzione' ? 'aggiungi' : 'crea scheda'}</label>` : ''}</li>`).join('')}</ul>` : ''}
          ${cnt('moved') ? `<h4 style="margin:0 0 6px">Spostati</h4><ul class="dlist">${plan.filter(p => p.kind === 'moved').map(p => `<li><span class="chip warn">Spostato</span><span>${esc(kname(p.k))} · ora ${fLong(p.r.date)}, ${p.r.start}<br><small style="color:var(--mute)">prima ${fLong(p.ex.date)}, ${p.ex.start}</small></span><span></span></li>`).join('')}</ul>` : ''}
          ${gone.length ? `<h4 style="margin:0 0 6px">Non più nel palinsesto</h4><ul class="dlist">${gone.map(s => `<li><span class="chip">Rimosso</span><span>${esc(kname(kidById(s.kid)))} · ${fLong(s.date)}, ${s.start}</span><label style="font-size:12.5px;display:flex;gap:6px;align-items:center"><input type="checkbox" checked data-gone="${s.id}">elimina</label></li>`).join('')}</ul>` : ''}
          ${cnt('same') ? `<p style="color:var(--mute);font-size:13.5px">${cnt('same')} incontri invariati.</p>` : ''}
@@ -551,7 +560,7 @@ function importDialog(){
             if(p.kind === 'moved'){ p.ex.flag = `Spostato da ${DS[parseIso(p.ex.date).getDay()]} ${p.ex.start}`; Object.assign(p.ex, {date: p.r.date, start: p.r.start, room: p.r.room || p.ex.room, duration: p.r.duration || p.ex.duration, source: 'palinsesto'}); return; }
             let k = p.k;
             if(!k){ const cb = $(`[data-create="${i}"]`, res); if(cb && !cb.checked) return;
-              k = newKid({name: cap(p.r.first), surname: p.r.last, reason: 'Nuovo ingresso dal palinsesto: da completare', school: '', birth: ''}); if(p.r.age) k.ageHint = p.r.age; created++; }
+              k = newKid({name: cap(p.r.first), surname: p.r.last, reason: p.r.type === 'Sostituzione' ? '' : 'Nuovo ingresso dal palinsesto: da completare', school: '', birth: ''}); if(p.r.age) k.ageHint = p.r.age; if(p.r.type === 'Sostituzione'){ k.temp = true; k.colleague = p.r.colleague; } else created++; }
             D.sessions.push({id: uid(), kid: k.id, date: p.r.date, start: p.r.start, duration: p.r.duration || D.settings.duration, room: p.r.room, type: p.r.type, status: 'programmata', source: 'palinsesto', flag: 'Nuovo'});
           });
           const del = $$('[data-gone]', res).filter(c => c.checked).map(c => c.dataset.gone);
@@ -569,13 +578,13 @@ function newKid(v){ const k = {id: uid(), name: v.name, surname: v.surname || ''
   parents: [{name: '', role: 'madre', phone: '', email: '', consent: false, cdate: ''}, {name: '', role: 'padre', phone: '', email: '', consent: false, cdate: ''}], goals: []}; D.kids.push(k); return k; }
 function vKids(){
   const m = today().slice(0, 7);
-  const list = D.kids.filter(k => (kshow === 'archivio') === !!k.archived).filter(k => norm(`${k.name} ${k.surname} ${k.reason} ${k.school}`).includes(norm(kq))).sort((a, b) => a.name.localeCompare(b.name));
-  main().innerHTML = head('Bambini', `${D.kids.filter(k => !k.archived).length} bambini seguiti`, `<button class="btn" id="impA">${ic('import', 18)}Importa archivio</button><button class="btn pri" id="add">${ic('plus', 18)}Nuovo bambino</button>`) + `
-  <div class="toolbar"><label class="search">${ic('search', 18)}<input id="q" placeholder="Cerca per nome, scuola o motivo" value="${esc(kq)}" aria-label="Cerca"></label><div class="seg"><button data-show="attivi" class="${kshow === 'attivi' ? 'on' : ''}">In carico</button><button data-show="archivio" class="${kshow === 'archivio' ? 'on' : ''}">Archivio</button></div></div>
+  const list = D.kids.filter(k => kshow === 'sost' ? k.temp : !k.temp && (kshow === 'archivio') === !!k.archived).filter(k => norm(`${k.name} ${k.surname} ${k.reason} ${k.school}`).includes(norm(kq))).sort((a, b) => a.name.localeCompare(b.name));
+  main().innerHTML = head('Bambini', `${D.kids.filter(k => !k.archived && !k.temp).length} bambini seguiti`, `<button class="btn" id="impA">${ic('import', 18)}Importa archivio</button><button class="btn pri" id="add">${ic('plus', 18)}Nuovo bambino</button>`) + `
+  <div class="toolbar"><label class="search">${ic('search', 18)}<input id="q" placeholder="Cerca per nome, scuola o motivo" value="${esc(kq)}" aria-label="Cerca"></label><div class="seg"><button data-show="attivi" class="${kshow === 'attivi' ? 'on' : ''}">In carico</button><button data-show="sost" class="${kshow === 'sost' ? 'on' : ''}">Sostituzioni</button><button data-show="archivio" class="${kshow === 'archivio' ? 'on' : ''}">Archivio</button></div></div>
   ${list.length ? `<div class="kids">${list.map(k => { const ss = sessOf(k.id).filter(isDone); const nx = nextOf(k.id); const okc = k.parents.filter(p => p.name).every(p => p.consent) && k.parents.some(p => p.name);
-    return `<a class="kid" href="#bambino/${k.id}"><div class="top">${av(k)}<div><b>${esc(kname(k))}</b><small>${[k.birth ? ageOf(k.birth) + ' anni' : (k.ageHint ? k.ageHint + ' anni' : ''), k.school].filter(Boolean).map(esc).join(' · ') || 'Scheda da completare'}</small></div></div><p>${esc(k.reason || 'Motivo dell\'invio non ancora indicato.')}</p>
+    return `<a class="kid" href="#bambino/${k.id}"><div class="top">${av(k)}<div><b>${esc(kname(k))}</b><small>${k.temp ? 'In sostituzione' + (k.colleague ? ' di ' + esc(k.colleague) : '') : [k.birth ? ageOf(k.birth) + ' anni' : (k.ageHint ? k.ageHint + ' anni' : ''), k.school].filter(Boolean).map(esc).join(' · ') || 'Scheda da completare'}</small></div></div><p>${esc(k.temp ? (k.reason || 'Bambino seguito da un\'altra collega: qui trovi solo gli incontri fatti in sostituzione.') : (k.reason || 'Motivo dell\'invio non ancora indicato.'))}</p>
     <div class="ft"><span><b class="num">${ss.filter(s => s.date.slice(0, 7) === m).length}</b>questo mese</span><span><b class="num">${ss.length}</b>totali</span><span><b>${nx ? fShort(nx.date) : '—'}</b>prossimo</span><span>${okc ? '<span class="chip ok">Consenso</span>' : '<span class="chip warn">Consenso</span>'}</span></div></a>`; }).join('')}</div>`
-   : `<div class="card"><div class="empty">${ic('kids', 34, 1.3)}<b>${kq ? 'Nessun risultato' : kshow === 'archivio' ? 'Archivio vuoto' : 'Nessun bambino ancora'}</b>${kq ? 'Prova con un altro nome.' : kshow === 'archivio' ? 'Qui finiscono i percorsi conclusi.' : 'Aggiungi il primo bambino o importa il palinsesto del centro.'}</div></div>`}`;
+   : `<div class="card"><div class="empty">${ic('kids', 34, 1.3)}<b>${kq ? 'Nessun risultato' : kshow === 'archivio' ? 'Archivio vuoto' : kshow === 'sost' ? 'Nessuna sostituzione' : 'Nessun bambino ancora'}</b>${kq ? 'Prova con un altro nome.' : kshow === 'archivio' ? 'Qui finiscono i percorsi conclusi.' : kshow === 'sost' ? 'Quando sostituisci una collega, aggiungi l\'incontro dall\'Agenda scegliendo "Sostituzione".' : 'Aggiungi il primo bambino o importa il palinsesto del centro.'}</div></div>`}`;
   const q = $('#q'); q.oninput = () => { kq = q.value; const p = q.selectionStart; vKids(); const n = $('#q'); n.focus(); n.setSelectionRange(p, p); };
   $$('[data-show]').forEach(b => b.onclick = () => { kshow = b.dataset.show; vKids(); });
   $('#add').onclick = () => kidForm();
@@ -613,16 +622,18 @@ function vKid(arg){
   const hashTab = (location.hash.split('/')[2] || '');
   const k = kidById(id);
   if(!k){ location.hash = 'bambini'; return; }
-  const tab = ['panoramica', 'diario', 'progressi', 'anagrafica', 'prestazioni'].includes(hashTab) ? hashTab : 'panoramica';
+  const tab = k.temp ? (hashTab === 'prestazioni' ? 'prestazioni' : 'diario') : ['panoramica', 'diario', 'progressi', 'anagrafica', 'prestazioni'].includes(hashTab) ? hashTab : 'panoramica';
   const ss = sessOf(id), done = ss.filter(isDone), m = today().slice(0, 7), ns = notesOf(id), nx = nextOf(id);
   const age = k.birth ? ageOf(k.birth) : k.ageHint;
   main().innerHTML = `<div class="eyebrow"><a href="#bambini">${ic('left', 14, 2)} Bambini</a></div>
-  <div class="kh" style="background:var(--t${k.tint % 8})">${av(k, 'xl')}<div><h1>${esc(kname(k))}</h1><p>${[age ? age + ' anni' : '', k.school, k.since ? 'in carico dal ' + fFull(k.since) : ''].filter(Boolean).map(esc).join(' · ')}${k.archived ? ' · <b>archiviato</b>' : ''}</p></div>
-   <div class="acts"><button class="btn" id="nn">${ic('note', 18)}Nuova nota</button><button class="btn pri" id="rp">${ic('doc', 18)}Report per i genitori</button></div></div>
-  <div class="tabs" role="tablist">${[['panoramica', 'Panoramica'], ['diario', `Diario · ${ns.length}`], ['progressi', 'Obiettivi e progressi'], ['anagrafica', 'Anagrafica e consensi'], ['prestazioni', 'Prestazioni']].map(([t, l]) => `<button role="tab" aria-selected="${t === tab}" data-tab="${t}" class="${t === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="tab"></div>`;
+  <div class="kh" style="background:var(--t${k.tint % 8})">${av(k, 'xl')}<div><h1>${esc(kname(k))}</h1><p>${k.temp ? `<span class="chip warn">In sostituzione${k.colleague ? ' di ' + esc(k.colleague) : ''}</span>` : [age ? age + ' anni' : '', k.school, k.since ? 'in carico dal ' + fFull(k.since) : ''].filter(Boolean).map(esc).join(' · ')}${k.archived ? ' · <b>archiviato</b>' : ''}</p></div>
+   <div class="acts"><button class="btn" id="nn">${ic('note', 18)}Nuova nota</button>${k.temp ? `<button class="btn" id="take">${ic('kids', 18)}Prendi in carico</button><button class="btn pri" id="ho">${ic('doc', 18)}Nota per la collega</button>` : `<button class="btn pri" id="rp">${ic('doc', 18)}Report per i genitori</button>`}</div></div>
+  <div class="tabs" role="tablist">${(k.temp ? [['diario', `Diario · ${ns.length}`], ['prestazioni', 'Incontri']] : [['panoramica', 'Panoramica'], ['diario', `Diario · ${ns.length}`], ['progressi', 'Obiettivi e progressi'], ['anagrafica', 'Anagrafica e consensi'], ['prestazioni', 'Prestazioni']]).map(([t, l]) => `<button role="tab" aria-selected="${t === tab}" data-tab="${t}" class="${t === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="tab"></div>`;
   $$('[data-tab]').forEach(b => b.onclick = () => { history.replaceState(null, '', `#bambino/${id}/${b.dataset.tab}`); vKid(id); animateIn($('#tab')); });
+  const onT = $('.tabs button.on'); if(onT && onT.scrollIntoView) onT.scrollIntoView({block: 'nearest', inline: 'center'});
   $('#nn').onclick = () => noteForm(k, null, null, () => vKid(id));
-  $('#rp').onclick = () => reportView(k);
+  if(k.temp){ $('#ho').onclick = () => handover(k); $('#take').onclick = () => confirmBox('Prendere in carico?', `${esc(kname(k))} diventerà un bambino seguito da te, con scheda completa e obiettivi.`, 'Prendi in carico', false, () => { k.temp = false; k.since = today(); log(`${kname(k)} preso in carico (prima in sostituzione).`); save(); kidForm(k); }); }
+  else $('#rp').onclick = () => reportView(k);
   const T = $('#tab');
   const last = ns[ns.length - 1], first = ns[0];
   if(tab === 'panoramica'){
@@ -905,6 +916,29 @@ function archiveImport(kidId){
     }});
 }
 
+/* ============ NOTA PER LA COLLEGA (sostituzioni) ============ */
+function handover(k){
+  const ss = sessOf(k.id).filter(isDone).sort((a, b) => a.date.localeCompare(b.date));
+  const last = ss[ss.length - 1], st = D.settings;
+  const nn = last ? D.notes.find(n => n.kid === k.id && n.date === last.date) : null;
+  modal({title: 'Nota per la collega', sub: `${esc(kname(k))}${k.colleague ? ' · per ' + esc(k.colleague) : ''}. Rivedi il testo, poi copialo o stampalo.`, width: 640,
+    body: `<label class="fld"><span>Testo</span><textarea class="in" id="ht" rows="11">Ciao${k.colleague ? ' ' + k.colleague : ''},
+ti lascio un breve aggiornamento sull'incontro con ${k.name} ${k.surname}${last ? ' di ' + fLong(last.date) + ' alle ' + last.start : ''}, svolto in tua sostituzione.
+
+Cosa abbiamo fatto: ${nn ? nn.activity : ''}
+Osservazioni: ${nn && nn.obs !== '—' ? nn.obs : ''}
+
+Punti da riprendere: 
+
+A presto,
+${st.name || ''}</textarea></label>${!nn ? '<p style="color:var(--mute);font-size:13px;margin:0">Suggerimento: scrivi prima la nota dell\'incontro, verrà inserita qui in automatico.</p>' : ''}`,
+    foot: `<button class="btn" id="hc">${ic('file', 17)}Copia</button><button class="btn pri" id="hp">${ic('print', 17)}Stampa</button>`,
+    onOpen: ov => {
+      $('#hc', ov).onclick = async () => { try { await navigator.clipboard.writeText($('#ht', ov).value); toast('Nota copiata: incollala dove preferisci'); } catch(e){ toast('Seleziona il testo e copialo a mano'); } };
+      $('#hp', ov).onclick = () => { $('#print').innerHTML = `<div class="paper"><div class="hd"><div><b>${esc(st.name || 'MyMind')}</b>${esc([st.title, st.place].filter(Boolean).join(' · '))}</div><div style="text-align:right">Nota di passaggio · riservata<br>${fFull(today())}</div></div><p>${esc($('#ht', ov).value)}</p></div>`; print(); };
+    }});
+}
+
 /* ============ PRESTAZIONI ============ */
 let curMonth = null;
 function vMoney(){
@@ -920,10 +954,10 @@ function vMoney(){
   const isCur = m === today().slice(0, 7);
   main().innerHTML = head('Prestazioni', 'Incontri svolti e riepilogo mensile per la fattura', `<div class="mnav"><button class="iconbtn" id="mp" aria-label="Mese precedente">${ic('left', 18)}</button><b>${fMonth(m)}</b><button class="iconbtn" id="mn" aria-label="Mese successivo">${ic('right', 18)}</button></div>`) + `
   ${pending ? `<div class="card flat" style="margin-bottom:18px;border-color:color-mix(in srgb,var(--acc) 40%,var(--line));background:var(--accsoft);display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><span style="color:var(--accink);font-weight:600">${ic('warn', 18)} ${pending} incontri di questo mese non sono ancora confermati e non vengono contati.</span><button class="btn sm" id="cf">Conferma ora</button></div>` : ''}
-  <div class="grid c2"><div class="card pad0">${rows.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Bambino</th><th class="r">Incontri</th><th class="r">di cui con i genitori</th><th class="r">Importo</th></tr></thead><tbody>${rows.map(r => `<tr class="lk" data-k="${r.k.id}"><td><div style="display:flex;gap:10px;align-items:center">${av(r.k, 'sm')}<b>${esc(kname(r.k))}</b></div></td><td class="r">${r.n}</td><td class="r">${r.g || '—'}</td><td class="r">${eur(r.n * st.fee)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Totale</td><td class="r">${n}</td><td class="r">${rows.reduce((a, r) => a + r.g, 0) || '—'}</td><td class="r">${eur(imp)}</td></tr></tfoot></table></div>`
+  <div class="grid c2"><div class="card pad0">${rows.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Bambino</th><th class="r">Incontri</th><th class="r">di cui con i genitori</th><th class="r">Importo</th></tr></thead><tbody>${rows.map(r => `<tr class="lk" data-k="${r.k.id}"><td><div style="display:flex;gap:10px;align-items:center">${av(r.k, 'sm')}<b>${esc(kname(r.k))}</b>${r.k.temp ? `<span class="chip warn">Sostituzione${r.k.colleague ? ' · ' + esc(r.k.colleague) : ''}</span>` : ''}</div></td><td class="r">${r.n}</td><td class="r">${r.g || '—'}</td><td class="r">${eur(r.n * st.fee)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Totale</td><td class="r">${n}</td><td class="r">${rows.reduce((a, r) => a + r.g, 0) || '—'}</td><td class="r">${eur(imp)}</td></tr></tfoot></table></div>`
     : `<div class="empty">${ic('euro', 30, 1.3)}<b>Nessuna prestazione</b>Non ci sono incontri svolti a ${fMonth(m).toLowerCase()}.</div>`}</div>
    <div class="card" style="align-self:start"><div class="ch"><h2>Fattura${st.place ? ' a ' + esc(st.place) : ''}</h2>${sent ? `<span class="chip ok">Inviata il ${fShort(sent)}</span>` : isCur ? '<span class="chip">Mese in corso</span>' : n ? '<span class="chip warn">Da inviare</span>' : ''}</div>
-    <div class="inv"><div><span>${n} prestazioni × ${eur(st.fee)}</span><span>${eur(imp)}</span></div><div><span>Contributo integrativo ${String(st.contrib).replace('.', ',')}%</span><span>${eur(cp)}</span></div><div><span>Marca da bollo</span><span>${eur(bollo)}</span></div><div class="tot"><span>Totale</span><span>${eur(tot)}</span></div></div>
+    <div class="inv"><div><span>${n} prestazioni × ${eur(st.fee)}</span><span>${eur(imp)}</span></div>${list.some(s => (kidById(s.kid) || {}).temp) ? `<div style="font-size:13px;color:var(--mute)"><span>di cui in sostituzione</span><span>${list.filter(s => (kidById(s.kid) || {}).temp).length}</span></div>` : ''}<div><span>Contributo integrativo ${String(st.contrib).replace('.', ',')}%</span><span>${eur(cp)}</span></div><div><span>Marca da bollo</span><span>${eur(bollo)}</span></div><div class="tot"><span>Totale</span><span>${eur(tot)}</span></div></div>
     <div style="display:grid;gap:8px;margin-top:18px"><button class="btn" id="pr" ${n ? '' : 'disabled'}>${ic('print', 17)}Stampa il riepilogo</button><button class="btn" id="csv" ${n ? '' : 'disabled'}>${ic('down', 17)}Scarica l'elenco (CSV)</button>${!sent && n ? `<button class="btn pri" id="snt">${ic('check', 17)}Segna come inviata</button>` : ''}</div>
     <p style="color:var(--mute);font-size:12.5px;margin:14px 0 0">Compenso, contributo e bollo si impostano in Impostazioni. Verifica le voci fiscali con il tuo commercialista.</p></div></div>`;
   $('#mp').onclick = () => { curMonth = prevM; vMoney(); };
@@ -933,7 +967,7 @@ function vMoney(){
   const sn = $('#snt'); if(sn) sn.onclick = () => { D.invoices[m] = today(); log(`Fattura di ${fMonth(m).toLowerCase()} segnata come inviata.`); save(); vMoney(); toast('Fattura segnata come inviata'); };
   const csv = $('#csv'); if(csv) csv.onclick = () => { const lines = [['Data', 'Ora', 'Bambino', 'Tipo', 'Stanza'].join(';')].concat(list.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)).map(s => [s.date.split('-').reverse().join('/'), s.start, kname(kidById(s.kid)), s.type, s.room || ''].map(x => `"${String(x).replace(/"/g, '""')}"`).join(';'))); download(`prestazioni-${m}.csv`, new Blob(['﻿' + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'})); };
   const pr = $('#pr'); if(pr) pr.onclick = () => { $('#print').innerHTML = `<div class="paper"><div class="hd"><div><b>${esc(st.name || 'MyMind')}</b>${esc([st.title, st.place].filter(Boolean).join(' · '))}</div><div style="text-align:right">Riepilogo prestazioni<br>${fMonth(m)}</div></div><h3>Prestazioni di ${fMonth(m).toLowerCase()}</h3>
-    <table><thead><tr><th>Data</th><th>Ora</th><th>Bambino</th><th>Tipo</th></tr></thead><tbody>${list.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)).map(s => `<tr><td>${fShort(s.date)}</td><td>${s.start}</td><td>${esc(kname(kidById(s.kid)))}</td><td>${esc(s.type)}</td></tr>`).join('')}</tbody></table>
+    <table><thead><tr><th>Data</th><th>Ora</th><th>Bambino</th><th>Tipo</th></tr></thead><tbody>${list.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)).map(s => `<tr><td>${fShort(s.date)}</td><td>${s.start}</td><td>${esc(kname(kidById(s.kid)))}</td><td>${esc(s.type)}${kidById(s.kid).temp && kidById(s.kid).colleague ? ' (per ' + esc(kidById(s.kid).colleague) + ')' : ''}</td></tr>`).join('')}</tbody></table>
     <h4>Riepilogo</h4><table><tbody><tr><td>${n} prestazioni × ${eur(st.fee)}</td><td class="r">${eur(imp)}</td></tr><tr><td>Contributo integrativo ${st.contrib}%</td><td class="r">${eur(cp)}</td></tr><tr><td>Marca da bollo</td><td class="r">${eur(bollo)}</td></tr><tr><td><b>Totale</b></td><td class="r"><b>${eur(tot)}</b></td></tr></tbody></table></div>`; print(); };
 }
 
