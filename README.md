@@ -3,7 +3,7 @@
 Il quaderno di lavoro privato per psicologhe e psicoterapeute dell'età evolutiva.
 
 **Funzioni principali**
-- **Agenda:** settimana a griglia oraria, con importazione del palinsesto del centro da Excel, CSV o testo e confronto automatico con la settimana precedente (nuovi, spostati, rimossi).
+- **Agenda:** settimana a griglia oraria, con importazione del palinsesto del centro da **foto**, Excel, CSV o testo, revisione prima dell'importazione e confronto automatico con la settimana precedente (nuovi, spostati, rimossi). Dalla foto vengono letti anche codice paziente, ente, telefoni dei genitori e fine ciclo.
 - **Schede dei bambini:** anagrafica, consenso informato di entrambi i genitori, quadro clinico, obiettivi del percorso.
 - **Diario degli incontri:** valutazione degli obiettivi da 1 a 5 e grafici dei progressi.
 - **Report per i genitori:** grafici "all'inizio e oggi" e andamento nel tempo, stampabili o salvabili in PDF.
@@ -13,7 +13,8 @@ Il quaderno di lavoro privato per psicologhe e psicoterapeute dell'età evolutiv
 ## Privacy
 - **Dati solo sul dispositivo:** tutti i dati restano sul dispositivo, cifrati con **AES-256-GCM**.
 - **Chiave dei dati:** è casuale ed è protetta dalla password (PBKDF2-SHA256, 600.000 iterazioni) e da una **chiave di recupero** mostrata alla prima apertura.
-- **Nessuna connessione:** l'app **non effettua connessioni di rete**. La Content Security Policy (`connect-src 'none'`) lo impedisce a livello di browser. Non ci sono account, analisi, pubblicità o servizi esterni. Font e librerie sono inclusi nel repository.
+- **Nessun servizio esterno:** la Content Security Policy permette solo di caricare i file dell'app stessa (`connect-src 'self'`). Non ci sono account, analisi o pubblicità. Font, librerie e motore di lettura delle foto sono inclusi nel repository.
+- **Foto lette sul dispositivo:** la foto del palinsesto viene letta sul telefono (Tesseract, con il dizionario italiano incluso) e l'immagine non viene mai inviata.
 - **Backup:** è un file `.mymind` cifrato, da salvare su iCloud Drive o Google Drive. Senza password o chiave di recupero il file è illeggibile.
 - **Nessun dato nel repository:** questo repository contiene solo il codice dell'app, mai dati personali.
 
@@ -32,4 +33,5 @@ Apri MyMind, scegli **"Ho già un backup: ripristina"**, seleziona il file da iC
 - Figtree e Newsreader: SIL Open Font License.
 - SheetJS Community Edition: Apache 2.0.
 - mammoth.js: BSD-2-Clause.
+- tesseract.js, tesseract.js-core e dati linguistici Tesseract: Apache 2.0.
 - tesseract.js e tesseract.js-core: Apache 2.0. Dati linguistici Tesseract (italiano): Apache 2.0.
