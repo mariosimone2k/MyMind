@@ -1,5 +1,5 @@
 /* MyMind service worker: rende l'app disponibile offline. Mette in cache solo i file dell'app, mai i dati. */
-const CACHE = 'mymind-v1.3.0';
+const CACHE = 'mymind-v1.4.0';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
   'fonts/figtree.woff2', 'fonts/newsreader-500.woff2', 'fonts/newsreader-400-italic.woff2',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',

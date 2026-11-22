@@ -4,7 +4,7 @@
    L'app non effettua alcuna connessione di rete (vedi Content-Security-Policy in index.html). */
 'use strict';
 (() => {
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -60,6 +60,7 @@ const P = {
  sign:'<path d="M4 18c3-6 5-11 7-11s-1 9 1 9 3-4 4-4 1 3 4 3"/><path d="M4 21h16"/>',
  folder:'<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/>',
  face:'<path d="M4 8V6.5A2.5 2.5 0 0 1 6.5 4H8M16 4h1.5A2.5 2.5 0 0 1 20 6.5V8M20 16v1.5a2.5 2.5 0 0 1-2.5 2.5H16M8 20H6.5A2.5 2.5 0 0 1 4 17.5V16"/><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9.5 15.5c1.5 1.2 3.5 1.2 5 0"/>',
+ camera:'<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.5-2.5h5L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3.5"/>',
  eye:'<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
  key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16.5 6.5l2.5 2.5M14 9l2 2"/>',
  import:'<path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5"/><rect x="3.5" y="16" width="17" height="4.5" rx="1.5"/>'
@@ -186,6 +187,116 @@ const libs = {};
 const lib = src => libs[src] || (libs[src] = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = src; sc.onload = res; sc.onerror = () => { delete libs[src]; rej(new Error('lib')); }; document.head.appendChild(sc); }));
 const needXLSX = () => lib('vendor/xlsx.mini.min.js');
 const needDocx = () => lib('vendor/mammoth.browser.min.js');
+const needOCR = () => lib('vendor/tesseract/tesseract.min.js');
+/* lettura del testo da foto: tutto sul dispositivo, nessun invio */
+async function photoToCanvas(file){
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const long = Math.max(img.width, img.height), sc = long < 1800 ? 1800 / long : long > 3000 ? 3000 / long : 1;
+    const w = Math.round(img.width * sc), h = Math.round(img.height * sc);
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d', {willReadFrequently: true});
+    x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h), a = d.data, hist = new Uint32Array(256);
+    for(let i = 0; i < a.length; i += 4){ const g = Math.round(.299 * a[i] + .587 * a[i + 1] + .114 * a[i + 2]); a[i] = g; hist[g]++; }
+    const n = a.length / 4; let lo = 0, hi = 255, acc = 0;
+    for(let v = 0; v < 256; v++){ acc += hist[v]; if(acc > n * .01){ lo = v; break; } }
+    acc = 0; for(let v = 255; v >= 0; v--){ acc += hist[v]; if(acc > n * .01){ hi = v; break; } }
+    const k = 255 / Math.max(1, hi - lo);
+    for(let i = 0; i < a.length; i += 4){ let g = (a[i] - lo) * k; g = g < 0 ? 0 : g > 255 ? 255 : g; a[i] = a[i + 1] = a[i + 2] = g; }
+    x.putImageData(d, 0, 0); return c;
+  } finally { URL.revokeObjectURL(url); }
+}
+/* ricostruisce il palinsesto a griglia (un giorno per colonna) dalle parole riconosciute con la loro posizione */
+function parseGrid(words, refMonday){
+  const DAYRE = /^(luned|marted|mercoled|gioved|venerd|sabat)/i, WDI = {luned: 0, marted: 1, mercoled: 2, gioved: 3, venerd: 4, sabat: 5};
+  const W = words.filter(w => w.t && w.t.trim()).map(w => ({...w, t: w.t.trim(), cx: (w.x0 + w.x1) / 2, cy: (w.y0 + w.y1) / 2}));
+  // settimana dal titolo "16/11/2026 - 20/11/2026"
+  let weekStart = refMonday;
+  const dates = W.map(w => w.t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)).filter(Boolean);
+  const top = W.filter(w => /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.test(w.t)).sort((a, b) => a.cy - b.cy)[0];
+  const heads = W.filter(w => DAYRE.test(w.t)).map(w => { const k = Object.keys(WDI).find(x => w.t.toLowerCase().startsWith(x)); const next = W.find(z => Math.abs(z.cy - w.cy) < 20 && z.x0 > w.x1 && z.x0 - w.x1 < 60 && /^\d{1,2}$/.test(z.t)); return {i: WDI[k], x: w.x0, y: w.cy, day: next ? +next.t : null}; });
+  const hy = heads.length ? Math.min(...heads.map(h => h.y)) : 1e9;
+  const tds = W.filter(w => w.cy < hy && /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.test(w.t)).map(w => { const m = w.t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); return new Date(+m[3], +m[2] - 1, +m[1]); }).sort((a, b) => a - b);
+  if(tds.length) weekStart = tds[0];
+  else { const h0 = heads.find(h => h.day); if(h0){ const base = refMonday instanceof Date ? refMonday : new Date(); for(let k = 0; k <= 70; k++){ for(const sg of [-1, 1]){ const d = addDays(base, sg * k); if(d.getDate() === h0.day && (d.getDay() + 6) % 7 === h0.i){ weekStart = addDays(d, -h0.i); k = 999; break; } } } } }
+  weekStart = monday(weekStart instanceof Date ? weekStart : new Date());
+  if(heads.length < 2) return null;
+  heads.sort((a, b) => a.x - b.x);
+  const colW = (heads[heads.length - 1].x - heads[0].x) / Math.max(1, heads[heads.length - 1].i - heads[0].i);
+  const headY = Math.min(...heads.map(h => h.y));
+  // orari "16:00 - 17:00": ancore delle caselle
+  const fixT = s => { s = s.replace(/[‘’'`]/g, '').replace(/[oOQD]/g, '0').replace(/[.,;]/, ':'); let [h, m] = s.split(':'); if(m.length === 1) m = m + '0'; return `${h.padStart(2, '0')}:${m}`; };
+  const isT = s => /^\d{1,2}[:.,;][0-5oOQD][0-9oOQD]?$/.test(s.replace(/[‘’'`]/g, '')) && +s.replace(/[‘’'`]/g, '').split(/[:.,;]/)[0] <= 23;
+  const tt = W.filter(w => w.cy > headY + 10 && isT(w.t));
+  const anchors = [];
+  tt.forEach(w => { const same = tt.filter(z => z !== w && Math.abs(z.cy - w.cy) < 14);
+    if(same.some(z => z.x0 < w.x0 && w.x0 - z.x0 < colW * .6)) return;
+    const end = same.filter(z => z.x0 > w.x0 && z.x0 - w.x0 < colW * .6).sort((p, q) => p.x0 - q.x0)[0];
+    anchors.push({w, start: fixT(w.t), end: end ? fixT(end.t) : null, y: w.y0, partial: !end || w.t.replace(/\D/g, '').length < 3}); });
+  W.forEach(w => { if(w.cy <= headY + 10 || !/^\d{4}$/.test(w.t)) return; const dash = W.find(z => Math.abs(z.cy - w.cy) < 14 && z.x0 >= w.x1 - 2 && z.x0 - w.x1 < 30 && /^[-–—]/.test(z.t)); if(!dash) return;
+    if(anchors.some(a => Math.abs(a.w.x0 - w.x0) < colW * .5 && w.cy - a.w.cy > 0 && w.cy - a.w.cy < 60)) return;
+    anchors.push({w, start: null, end: null, y: w.y0 - 22, partial: true, codeOnly: true}); });
+  // inclinazione della foto: stima dalla deriva orizzontale delle ancore nella stessa colonna
+  const colOf0 = x => heads.reduce((b, h) => Math.abs(h.x - x) < Math.abs(b.x - x) ? h : b, heads[0]);
+  let num = 0, den = 0; anchors.forEach(a => { const h = colOf0(a.w.x0); num += (a.w.x0 - h.x) * (a.y - h.y); den += (a.y - h.y) ** 2; });
+  const skew = den ? Math.max(-.08, Math.min(.08, num / den)) : 0;
+  const colIdx = (x, y) => { const xx = x - skew * (y - headY); let best = 0, bd = 1e9; heads.forEach((h, j) => { const d = xx - (h.x - colW * .04); if(d > -colW * .25 && d < bd){ bd = d; best = j; } }); return best; };
+  const cols = heads.map(() => []);
+  W.forEach(w => { if(w.cy > headY + 12) cols[colIdx(w.x0, w.cy)].push(w); });
+  const rows = [];
+  heads.forEach((h, j) => {
+    const A = anchors.filter(a => colIdx(a.w.x0, a.w.cy) === j).sort((a, b) => a.y - b.y);
+    A.forEach((a, k) => {
+      const yTop = a.y - 6, yBot = k + 1 < A.length ? A[k + 1].y - 6 : yTop + colW * 1.1;
+      const ws = cols[j].filter(w => w.cy >= yTop && w.cy < yBot).sort((p, q) => p.cy - q.cy || p.x0 - q.x0);
+      const lines = []; ws.forEach(w => { const L = lines.find(l => Math.abs(l.y - w.cy) < 11); if(L){ L.w.push(w); } else lines.push({y: w.cy, w: [w]}); });
+      const txt = lines.map(l => l.w.sort((p, q) => p.x0 - q.x0).map(w => w.t).join(' ')).filter(Boolean);
+      const body = txt.slice(1).join('\n');
+      const flat = body.replace(/\n/g, ' ');
+      const nm = flat.match(/(\d{3,5})\s*[-–—]\s*([A-ZÀ-Ü' ]{3,}?)(?=\s+(?:Amb\b|Amb\.|Pacchetto|\d{3}|$))/) || flat.match(/(\d{3,5})\s*[-–—]\s*([A-ZÀ-Ü']+(?:\s+[A-ZÀ-Ü']+){0,3})/);
+      const ente = ((flat.match(/Amb\.?\s*([A-Z]{2,6})/) || [])[1] || '').replace(/^(MADRE|PADRE|NONNA|NONNO|DATA)$/, '');
+      const fine = flat.match(/fine\s+ciclo\s*:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+      const pack = (flat.match(/Pacchetto[^0-9]*(\d+\s*sedute[^0-9]*)?/i) || [''])[0].trim();
+      const phones = []; const re = /(\+39\s?)?(\d[\d\s.\/]{7,15}\d)/g; let pm;
+      while((pm = re.exec(flat))){ const d = pm[2].replace(/\D/g, ''); if(!/^(3\d{9}|0\d{8,10})$/.test(d)) continue; const after = flat.slice(re.lastIndex, re.lastIndex + 30).split(/\d{3}/)[0];
+        const rm = after.match(/(MADRE|PADRE|NONNA|NONNO|MAMMA|PAP[AÀ]|TUTORE)/i); if(!phones.some(x => x.num === d)) phones.push({num: d, role: rm ? rm[1].toLowerCase().replace('mamma', 'madre').replace(/pap[aà]/, 'padre') : ''}); }
+      const [s1, e1] = [a.start || '00:00', a.end || a.start || '00:00'].map(t => { const [hh, mm] = t.split(':').map(Number); return hh * 60 + mm; });
+      const parts = nm ? nm[2].trim().split(/\s+/).filter(x => x.length > 1) : [];
+      rows.push({dayIdx: h.i, start: a.start ? a.start.padStart(5, '0') : '', duration: e1 > s1 ? e1 - s1 : null, code: nm ? nm[1] : '', last: parts[0] || '', first: parts.slice(1).join(' '), ente, cycleEnd: fine ? `${fine[3]}-${String(fine[2]).padStart(2, '0')}-${String(fine[1]).padStart(2, '0')}` : '', phones, note: pack, raw: txt.join(' / '), check: a.partial || !nm});
+    });
+  });
+  return {weekStart, rows: rows.sort((a, b) => a.dayIdx - b.dayIdx || a.start.localeCompare(b.start))};
+}
+
+async function ocrImage(file, onProgress){
+  await needOCR();
+  const canvas = await photoToCanvas(file);
+  const base = new URL('vendor/tesseract/', location.href).href;
+  const worker = await Tesseract.createWorker('ita', 1, {workerPath: base + 'worker.min.js', corePath: base + 'core', langPath: base + 'lang', workerBlobURL: false, gzip: true,
+    logger: m => { if(m.status === 'recognizing text') onProgress(Math.round(m.progress * 100)); else if(/load/.test(m.status)) onProgress(-1); }});
+  try { await worker.setParameters({preserve_interword_spaces: '1', tessedit_pageseg_mode: '6'}); const {data} = await worker.recognize(canvas, {}, {blocks: true, text: true});
+    const words = []; (data.blocks || []).forEach(b => b.paragraphs.forEach(p => p.lines.forEach(l => l.words.forEach(w => words.push({t: w.text, c: w.confidence, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1})))));
+    return {text: data.text, words}; }
+  finally { await worker.terminate(); }
+}
+/* trasforma una riga letta da foto in celle: giorno/data | ora | nome | stanza | tipo */
+function ocrLine(line){
+  let l = ' ' + line.replace(/[|¦]/g, ' ').replace(/\s+/g, ' ') + ' ';
+  l = l.replace(/(\b\d{1,2})\s?[.,:;]\s?([0-5OoQD][0-9OoQD])\b/g, (m, h, mm) => `${h}:${mm.replace(/[OoQD]/g, '0')}`);
+  const tm = l.match(/\b(\d{1,2}:\d{2})(?:\s?[-–]\s?(\d{1,2}:\d{2}))?/); if(!tm) return null;
+  const take = re => { const m = l.match(re); if(m){ l = l.replace(m[0], ' '); return m[0].trim(); } return ''; };
+  const time = take(/\b\d{1,2}:\d{2}(?:\s?[-–]\s?\d{1,2}:\d{2})?/);
+  const date = take(/\b\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?\b/);
+  const wd = take(/\b(lun|mar|mer|gio|ven|sab|dom)[a-zì]*\.?(?=\s)/i);
+  const room = take(/\b(stanza|studio|aula|sala)\s*\w{0,3}/i);
+  const sub = take(/\b(sostitu\w*|sost\.?)(\s*(di|per)?\s*(dott\.?(ssa)?|dr\.?(ssa)?)\s*[A-ZÀ-Ü][\wà-ü']+)?/i);
+  const type = take(/\b(primo incontro|primo colloquio|colloquio (con i )?genitori|genitori di|valutazione|restituzione|psicoterapia|colloquio clinico|seduta|terapia|test)\b/i);
+  const age = take(/\b\d{1,2}\s?anni\b/i);
+  const name = l.replace(/[^A-Za-zÀ-ÿ'. ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(w => w.length > 1 || /^[A-Z]\.?$/.test(w)).slice(0, 3).join(' ');
+  if(!name) return null;
+  return [[wd, date].filter(Boolean).join(' '), time, [name, age].filter(Boolean).join(' '), room, [type, sub].filter(Boolean).join(' ')].join(' | ');
+}
 
 /* ============ UI helpers ============ */
 function toast(t){ const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove('on'), 2800); }
@@ -392,6 +503,7 @@ function vToday(){
   if(toConfirm.length) todos.push(`<button data-go="confirm"><span class="ti warn">${ic('check', 18)}</span><span><b>${toConfirm.length} ${toConfirm.length === 1 ? 'incontro da confermare' : 'incontri da confermare'}</b><small>Segna se si sono svolti: le prestazioni si contano da qui</small></span>${ic('right', 16)}</button>`);
   if(backupLate()) todos.push(`<button data-go="backup"><span class="ti warn">${ic('cloud', 18)}</span><span><b>Fai il backup</b><small>Ultimo: ${ago(st.lastBackup)}. Salvalo su iCloud Drive o Google Drive</small></span>${ic('right', 16)}</button>`);
   if(noNote.length) todos.push(`<a href="#bambino/${noNote[0].kid}/diario"><span class="ti">${ic('note', 18)}</span><span><b>${noNote.length} ${noNote.length === 1 ? 'incontro senza nota' : 'incontri senza nota'}</b><small>Ultime due settimane · inizia da ${esc(kname(kidById(noNote[0].kid)))}</small></span>${ic('right', 16)}</a>`);
+  D.kids.filter(k => !k.archived && !k.temp && k.cycleEnd && (parseIso(k.cycleEnd) - new Date()) / 86400000 < 21).sort((a, b) => a.cycleEnd.localeCompare(b.cycleEnd)).slice(0, 3).forEach(k => todos.push(`<a href="#bambino/${k.id}/anagrafica"><span class="ti warn">${ic('cal', 18)}</span><span><b>Ciclo ${k.cycleEnd < t ? 'scaduto' : 'in scadenza'}</b><small>${esc(kname(k))}: fine ciclo ${fLong(k.cycleEnd)}</small></span>${ic('right', 16)}</a>`));
   consents.slice(0, 3).forEach(k => todos.push(`<a href="#bambino/${k.id}/anagrafica"><span class="ti">${ic('sign', 18)}</span><span><b>Consenso incompleto</b><small>${esc(kname(k))}: manca la firma di ${esc(k.parents.find(p => p.name && !p.consent).name)}</small></span>${ic('right', 16)}</a>`));
   main().innerHTML = `<section class="hero"><div><h1>${greet}${first ? `, <em>${esc(first)}</em>` : ''}</h1><p>${cap(fLong(t))} · ${todays.length ? `${todays.length} ${todays.length === 1 ? 'incontro' : 'incontri'} in programma oggi` : 'nessun incontro oggi'}</p></div>
    ${upcoming ? (k => `<a class="next" href="#bambino/${k.id}"><small>Prossimo incontro</small><b>${esc(kname(k))}</b><span>${upcoming.date === t ? 'Oggi' : cap(fLong(upcoming.date))} alle ${upcoming.start} · ${esc(upcoming.room || upcoming.type)}</span></a>`)(kidById(upcoming.kid)) : ''}</section>
@@ -546,15 +658,39 @@ function parseRows(rows, refMonday){
   }
   return out.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
 }
+function lev(a, b){ const m = a.length, n = b.length; if(!m || !n) return m || n; let p = Array.from({length: n + 1}, (_, j) => j); for(let i = 1; i <= m; i++){ const c = [i]; for(let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; }
+const titleCase = s => (s || '').toLowerCase().replace(/(^|[\s'’-])([a-zà-ü])/g, (m, a, b) => a + b.toUpperCase());
 function matchKid(r){
+  if(r.code){ const k = D.kids.find(k => k.code && k.code === r.code); if(k) return k; }
   const f = norm(r.first), l = norm(r.last).replace(/ /g, '');
-  return D.kids.find(k => norm(k.name) === f && (!l || norm(k.surname).replace(/ /g, '') === l || norm(k.surname).charAt(0) === l.charAt(0)));
+  const exact = D.kids.find(k => norm(k.name) === f && (!l || norm(k.surname).replace(/ /g, '') === l || (l.length <= 2 && norm(k.surname).charAt(0) === l.charAt(0))));
+  if(exact) return exact;
+  // nomi letti da foto: tollera piccoli errori e l'ordine COGNOME NOME
+  const full = norm(`${r.last} ${r.first}`).replace(/ /g, ''), full2 = norm(`${r.first} ${r.last}`).replace(/ /g, '');
+  if(full.length < 6) return null;
+  let best = null, bd = 9;
+  D.kids.forEach(k => { const a = norm(`${k.surname} ${k.name}`).replace(/ /g, ''), b = norm(`${k.name} ${k.surname}`).replace(/ /g, ''); const d = Math.min(lev(a, full), lev(b, full2), lev(b, full)); if(d < bd){ bd = d; best = k; } });
+  return bd <= Math.max(2, Math.floor(full.length / 6)) ? best : null;
+}
+function enrichKid(k, r){
+  if(r.code && !k.code) k.code = r.code;
+  if(r.ente) k.ente = r.ente;
+  if(r.cycleEnd) k.cycleEnd = r.cycleEnd;
+  if(r.note && !(k.notes || '').includes(r.note)) k.notes = [k.notes, r.note].filter(Boolean).join('\n');
+  (r.phones || []).forEach(ph => {
+    if(k.parents.some(p => (p.phone || '').replace(/\D/g, '') === ph.num)) return;
+    const role = ph.role === 'nonna' || ph.role === 'nonno' ? 'altro' : ph.role;
+    let p = k.parents.find(p => !p.phone && (!role || p.role === role)) || (role ? null : k.parents.find(p => !p.phone));
+    if(!p && k.parents.length < 4){ p = {name: '', role: role || 'altro', phone: '', email: '', consent: false, cdate: ''}; k.parents.push(p); }
+    if(p){ p.phone = ph.num.replace(/^(3\d{2})(\d{3})(\d{3,4})$/, '$1 $2 $3'); if(ph.role === 'nonna' || ph.role === 'nonno') p.name = p.name || cap(ph.role); }
+  });
 }
 function importDialog(){
   const nextMon = iso(addDays(monday(new Date()), 7));
-  modal({title: 'Importa il palinsesto', sub: 'Carica il file ricevuto dal centro (Excel o CSV) oppure incolla il testo dell\'email. Il file viene letto solo su questo dispositivo.', width: 860,
-    body: `<div class="grid c2e"><div><label class="drop" id="dz"><input type="file" id="fi" accept=".xlsx,.xls,.csv,.txt" class="sr"><b>Scegli il file del palinsesto</b>Excel, CSV o testo · oppure trascinalo qui</label>
-      <label class="fld" style="margin-top:14px"><span>Oppure incolla il testo</span><textarea class="in" id="tx" rows="9" placeholder="Lun 30/11 | 14:30 | Matteo B. 7 anni | Stanza 2 | Seduta" style="font:13px/1.55 ui-monospace,Menlo,monospace"></textarea></label>
+  modal({title: 'Importa il palinsesto', sub: 'Fotografa il palinsesto, carica il file del centro o incolla il testo dell\'email. Foto e file vengono letti solo su questo dispositivo.', width: 860,
+    body: `<div class="grid c2e"><div><div class="row2" style="margin-bottom:10px"><label class="drop" id="ph" style="padding:16px"><input type="file" id="pfi" accept="image/*" class="sr"><b>${ic('camera', 20)} Foto del palinsesto</b>Scatta o scegli una foto</label><label class="drop" id="dz" style="padding:16px"><input type="file" id="fi" accept=".xlsx,.xls,.csv,.txt" class="sr"><b>File</b>Excel, CSV o testo</label></div>
+      <div id="ocrS" class="hide" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--mute);margin-bottom:6px"><span id="ocrT">Preparo la lettura…</span><span id="ocrP"></span></div><div class="meter"><i id="ocrB" style="background:var(--brand)"></i></div></div>
+      <label class="fld" style="margin-top:14px"><span>Testo del palinsesto · puoi incollarlo o correggerlo qui</span><textarea class="in" id="tx" rows="9" placeholder="Lun 30/11 | 14:30 | Matteo B. 7 anni | Stanza 2 | Seduta" style="font:13px/1.55 ui-monospace,Menlo,monospace"></textarea></label>
       <label class="fld"><span>Settimana di riferimento</span><input class="in" type="date" id="wk" value="${nextMon}"><small>Usata quando nel palinsesto ci sono solo i giorni della settimana, senza data.</small></label>
       <button class="btn pri" id="an">Analizza</button></div><div id="res"><div class="empty">${ic('import', 30, 1.4)}<b>Anteprima delle modifiche</b>Dopo l'analisi vedrai cosa cambia rispetto all'agenda, prima di confermare.</div></div></div>`,
     onOpen: ov => {
@@ -567,11 +703,49 @@ function importDialog(){
         } catch(e){ toast('Non riesco a leggere questo file'); }
       };
       fi.onchange = e => e.target.files[0] && readFile(e.target.files[0]);
+      $('#pfi', ov).onchange = async e => { const f = e.target.files[0]; if(!f) return;
+        const S = $('#ocrS', ov), B = $('#ocrB', ov), Pp = $('#ocrP', ov), Tt = $('#ocrT', ov); S.classList.remove('hide'); Tt.textContent = 'Preparo la lettura (la prima volta può richiedere qualche secondo)…'; B.style.width = '4%'; Pp.textContent = '';
+        try {
+          const {text, words} = await ocrImage(f, pct => { if(pct < 0){ Tt.textContent = 'Carico il riconoscimento del testo…'; return; } Tt.textContent = 'Leggo la foto sul dispositivo…'; B.style.width = Math.max(6, pct) + '%'; Pp.textContent = pct + '%'; });
+          const grid = parseGrid(words, monday(parseIso($('#wk', ov).value || nextMon)));
+          if(grid && grid.rows.length){ B.style.width = '100%'; Tt.textContent = `Riconosciuti ${grid.rows.length} incontri dalla griglia: controllali qui accanto`; reviewGrid(grid); return; }
+          const rows = text.split(/\n/).map(ocrLine).filter(Boolean);
+          B.style.width = '100%'; Tt.textContent = rows.length ? `Riconosciute ${rows.length} righe: controllale e correggi se serve` : 'Non ho riconosciuto orari: prova una foto più dritta e luminosa';
+          $('#tx', ov).value = rows.length ? rows.join('\n') : text.trim();
+          if(rows.length) analyze();
+        } catch(x){ Tt.textContent = 'Non è stato possibile leggere la foto.'; console.warn(x); }
+      };
       dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); }; dz.ondragleave = () => dz.classList.remove('over'); dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); e.dataTransfer.files[0] && readFile(e.dataTransfer.files[0]); };
       $('#an', ov).onclick = analyze;
+      function reviewGrid(grid){
+        const res = $('#res', ov), ws = grid.weekStart, DAYN = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+        let rows = grid.rows.map(r => ({...r}));
+        const row = (r, i) => `<li class="rv ${r.check ? 'chk' : ''}" data-i="${i}"><label class="rv-inc"><input type="checkbox" ${r.off ? '' : 'checked'} data-f="on" aria-label="Includi"></label>
+          <div class="rv-g"><select class="in" data-f="dayIdx">${DAYN.map((d, j) => `<option value="${j}" ${+r.dayIdx === j ? 'selected' : ''}>${d} ${addDays(ws, j).getDate()}</option>`).join('')}</select>
+          <input class="in" type="time" data-f="start" value="${r.start || ''}" aria-label="Ora"><input class="in" data-f="last" value="${esc(titleCase(r.last))}" placeholder="Cognome"><input class="in" data-f="first" value="${esc(titleCase(r.first))}" placeholder="Nome">
+          <input class="in" data-f="code" value="${esc(r.code)}" placeholder="Codice" inputmode="numeric"><input class="in" type="number" data-f="duration" value="${r.duration || ''}" placeholder="min" min="10" step="5" aria-label="Durata"></div>
+          <small class="rv-raw">${r.check ? '<b>Da controllare</b> · ' : ''}${esc([r.ente && 'Amb. ' + r.ente, r.phones.length ? r.phones.length + (r.phones.length === 1 ? ' telefono' : ' telefoni') : '', r.cycleEnd && 'fine ciclo ' + fShort(r.cycleEnd) + ' ' + r.cycleEnd.slice(0, 4)].filter(Boolean).join(' · ') || r.raw.slice(0, 80))}</small></li>`;
+        const paint = () => {
+          res.innerHTML = `<div class="ch" style="margin-bottom:8px"><h2>Controlla la lettura</h2><small>Settimana dal ${fShort(iso(ws))}</small></div>
+           <p style="margin:0 0 12px;font-size:13.5px;color:var(--ink2)">Le correzioni scritte a penna (orari barrati, nomi aggiunti) non vengono lette in modo affidabile: correggile o aggiungile qui.</p>
+           <ul class="dlist rvl">${rows.map(row).join('')}</ul>
+           <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="addR">${ic('plus', 16)}Aggiungi incontro</button><button class="btn pri" id="goR" style="flex:1">Continua</button></div>`;
+          animateIn(res);
+          $$('[data-f]', res).forEach(el => el.onchange = el.oninput = () => { const i = +el.closest('[data-i]').dataset.i, f = el.dataset.f; if(f === 'on') rows[i].off = !el.checked; else rows[i][f] = el.value; });
+          $('#addR', res).onclick = () => { rows.push({dayIdx: 0, start: '', duration: D.settings.duration, last: '', first: '', code: '', ente: '', cycleEnd: '', phones: [], note: '', raw: 'aggiunto a mano', check: false}); paint(); const l = $$('.rv', res).pop(); l && l.scrollIntoView({block: 'nearest'}); };
+          $('#goR', res).onclick = () => {
+            const bad = rows.filter(r => !r.off && (!/^\d{2}:\d{2}$/.test(r.start || '') || !(r.last || r.first)));
+            if(bad.length){ toast(`Completa ora e nome di ${bad.length} ${bad.length === 1 ? 'incontro' : 'incontri'}`); return; }
+            showPlan(rows.filter(r => !r.off).map(r => ({date: iso(addDays(ws, +r.dayIdx)), start: r.start, duration: +r.duration || null, room: r.ente ? 'Amb. ' + r.ente : '', type: 'Seduta', colleague: '', first: titleCase((r.first || '').trim()), last: titleCase((r.last || '').trim()), age: null, code: (r.code || '').trim(), ente: r.ente, cycleEnd: r.cycleEnd, phones: r.phones, note: r.note})).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)));
+          };
+        };
+        paint();
+      }
       function analyze(){
         const ref = iso(monday(parseIso($('#wk', ov).value || nextMon)));
-        const rows = parseRows($('#tx', ov).value.split(/\r?\n/).map(l => l.split(/\s*\|\s*|\t|;/)), ref);
+        showPlan(parseRows($('#tx', ov).value.split(/\r?\n/).map(l => l.split(/\s*\|\s*|\t|;/)), ref));
+      }
+      function showPlan(rows){
         const res = $('#res', ov);
         if(!rows.length){ res.innerHTML = `<div class="err">Non ho trovato appuntamenti. Ogni riga deve contenere almeno giorno o data, ora e nome del bambino.</div>`; return; }
         const w0 = iso(monday(parseIso(rows[0].date))), w1 = iso(addDays(parseIso(w0), 6));
@@ -581,7 +755,7 @@ function importDialog(){
           const k = matchKid(r);
           const ex = k && cur.find(s => s.kid === k.id && !used.has(s.id) && (s.type === 'Colloquio genitori') === (r.type === 'Colloquio genitori'));
           if(ex){ used.add(ex.id); plan.push({r, k, ex, kind: ex.date === r.date && ex.start === r.start ? 'same' : 'moved'}); }
-          else plan.push({r, k, kind: 'new', create: !k});
+          else { const dupe = !k && plan.some(q => q.create && ((r.code && q.r.code === r.code) || (norm(q.r.first + q.r.last) === norm(r.first + r.last)))); plan.push({r, k, kind: 'new', create: !k && !dupe}); }
         });
         const gone = cur.filter(s => !used.has(s.id));
         const cnt = x => plan.filter(p => p.kind === x).length;
@@ -595,11 +769,13 @@ function importDialog(){
         $('#ok', res).onclick = () => {
           let created = 0;
           plan.forEach((p, i) => {
+            if(p.k) enrichKid(p.k, p.r);
             if(p.kind === 'same'){ p.ex.source = 'palinsesto'; p.ex.flag = ''; return; }
             if(p.kind === 'moved'){ p.ex.flag = `Spostato da ${DS[parseIso(p.ex.date).getDay()]} ${p.ex.start}`; Object.assign(p.ex, {date: p.r.date, start: p.r.start, room: p.r.room || p.ex.room, duration: p.r.duration || p.ex.duration, source: 'palinsesto'}); return; }
-            let k = p.k;
+            let k = p.k || matchKid(p.r);
             if(!k){ const cb = $(`[data-create="${i}"]`, res); if(cb && !cb.checked) return;
-              k = newKid({name: cap(p.r.first), surname: p.r.last, reason: p.r.type === 'Sostituzione' ? '' : 'Nuovo ingresso dal palinsesto: da completare', school: '', birth: ''}); if(p.r.age) k.ageHint = p.r.age; if(p.r.type === 'Sostituzione'){ k.temp = true; k.colleague = p.r.colleague; } else created++; }
+              k = newKid({name: titleCase(p.r.first || p.r.last), surname: p.r.first ? titleCase(p.r.last) : '', reason: p.r.type === 'Sostituzione' ? '' : 'Nuovo ingresso dal palinsesto: da completare', school: '', birth: '', since: p.r.date}); if(p.r.age) k.ageHint = p.r.age; if(p.r.type === 'Sostituzione'){ k.temp = true; k.colleague = p.r.colleague; } else created++; }
+            enrichKid(k, p.r);
             D.sessions.push({id: uid(), kid: k.id, date: p.r.date, start: p.r.start, duration: p.r.duration || D.settings.duration, room: p.r.room, type: p.r.type, status: 'programmata', source: 'palinsesto', flag: 'Nuovo'});
           });
           const del = $$('[data-gone]', res).filter(c => c.checked).map(c => c.dataset.gone);
@@ -636,6 +812,7 @@ function kidForm(k){
   modal({title: isNew ? 'Nuovo bambino' : 'Modifica anagrafica', width: 640,
     body: `<div class="row2"><label class="fld"><span>Nome</span><input class="in" id="n" value="${esc(v.name)}" autocomplete="off"></label><label class="fld"><span>Cognome</span><input class="in" id="s" value="${esc(v.surname)}" autocomplete="off"></label></div>
      <div class="row3"><label class="fld"><span>Data di nascita</span><input class="in" type="date" id="b" value="${v.birth}"></label><label class="fld"><span>Scuola e classe</span><input class="in" id="sc" value="${esc(v.school)}" placeholder="Es. 2ª primaria"></label><label class="fld"><span>In carico dal</span><input class="in" type="date" id="si" value="${v.since}"></label></div>
+     <div class="row3"><label class="fld"><span>Codice paziente</span><input class="in" id="co" value="${esc(v.code || '')}" inputmode="numeric"></label><label class="fld"><span>Ente</span><input class="in" id="en" value="${esc(v.ente || '')}" placeholder="Es. ASM, ASL BA"></label><label class="fld"><span>Fine ciclo</span><input class="in" type="date" id="ce" value="${v.cycleEnd || ''}"></label></div>
      <label class="fld"><span>Motivo dell'invio</span><textarea class="in" id="r" rows="2">${esc(v.reason)}</textarea></label>
      <label class="fld"><span>Diagnosi o ipotesi di lavoro</span><textarea class="in" id="dx" rows="2">${esc(v.dx)}</textarea></label>
      <h3 style="font-size:14.5px;margin:18px 0 10px">Genitori</h3>${v.parents.map(pr).join('<div style="height:10px"></div>')}`,
@@ -644,7 +821,7 @@ function kidForm(k){
       $('#ok', ov).onclick = () => {
         const name = fval(ov, 'n'); if(!name){ toast('Inserisci almeno il nome'); return; }
         const t = isNew ? newKid({name}) : k;
-        Object.assign(t, {name, surname: fval(ov, 's'), birth: fval(ov, 'b'), school: fval(ov, 'sc'), since: fval(ov, 'si') || today(), reason: fval(ov, 'r'), dx: fval(ov, 'dx')});
+        Object.assign(t, {name, surname: fval(ov, 's'), birth: fval(ov, 'b'), school: fval(ov, 'sc'), since: fval(ov, 'si') || today(), reason: fval(ov, 'r'), dx: fval(ov, 'dx'), code: fval(ov, 'co'), ente: fval(ov, 'en'), cycleEnd: fval(ov, 'ce')});
         [0, 1].forEach(i => Object.assign(t.parents[i], {name: fval(ov, 'pn' + i), role: fval(ov, 'pr' + i), phone: fval(ov, 'pt' + i), email: fval(ov, 'pe' + i)}));
         if(t.birth) delete t.ageHint;
         if(isNew) log(`Nuova scheda: ${kname(t)}.`);
@@ -714,7 +891,7 @@ function vKid(arg){
     if(k.goals.length && ns.length >= 2) drawChart(k, ns);
   }
   if(tab === 'anagrafica'){
-    T.innerHTML = `<div class="grid c2e"><div class="card"><div class="ch"><h2>Anagrafica</h2><div class="acts"><button class="btn sm" id="ed">${ic('edit', 15)}Modifica</button></div></div><dl class="kv"><dt>Nome</dt><dd>${esc(k.name)} ${esc(k.surname)}</dd><dt>Data di nascita</dt><dd>${k.birth ? fFull(k.birth) + ` (${ageOf(k.birth)} anni)` : '—'}</dd><dt>Scuola</dt><dd>${esc(k.school) || '—'}</dd><dt>In carico dal</dt><dd>${k.since ? fFull(k.since) : '—'}</dd></dl></div>
+    T.innerHTML = `<div class="grid c2e"><div class="card"><div class="ch"><h2>Anagrafica</h2><div class="acts"><button class="btn sm" id="ed">${ic('edit', 15)}Modifica</button></div></div><dl class="kv"><dt>Nome</dt><dd>${esc(k.name)} ${esc(k.surname)}</dd><dt>Data di nascita</dt><dd>${k.birth ? fFull(k.birth) + ` (${ageOf(k.birth)} anni)` : '—'}</dd><dt>Scuola</dt><dd>${esc(k.school) || '—'}</dd><dt>In carico dal</dt><dd>${k.since ? fFull(k.since) : '—'}</dd>${k.code ? `<dt>Codice</dt><dd class="num">${esc(k.code)}</dd>` : ''}${k.ente ? `<dt>Ente</dt><dd>${esc(k.ente)}</dd>` : ''}${k.cycleEnd ? `<dt>Fine ciclo</dt><dd>${fFull(k.cycleEnd)}${k.cycleEnd < today() ? ' <span class="chip warn">scaduto</span>' : (parseIso(k.cycleEnd) - new Date()) / 86400000 < 21 ? ' <span class="chip warn">in scadenza</span>' : ''}</dd>` : ''}${k.notes ? `<dt>Note</dt><dd>${esc(k.notes)}</dd>` : ''}</dl></div>
      <div class="card"><div class="ch"><h2>Genitori e consenso informato</h2></div>${k.parents.map((p, i) => `<div class="parent"><div><b>${esc(p.name) || `<span style="color:var(--mute)">Genitore ${i + 1} non indicato</span>`}</b> <span style="color:var(--mute)">· ${esc(p.role)}</span><small class="num">${[p.phone, p.email].filter(Boolean).map(esc).join(' · ') || '—'}</small></div>${p.consent ? `<span class="chip ok">${ic('check', 13, 2.5)}Firmato${p.cdate ? ' il ' + fShort(p.cdate) : ''}</span>` : `<button class="btn sm" data-sign="${i}" ${p.name ? '' : 'disabled'}>${ic('sign', 15)}Registra firma</button>`}</div>`).join('')}
       <p style="color:var(--mute);font-size:13px;margin:14px 0 0">Per i minori serve il consenso informato di chi esercita la responsabilità genitoriale, di norma entrambi i genitori.</p></div></div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:18px"><button class="btn quiet" id="arck">${k.archived ? 'Riporta in carico' : 'Archivia percorso'}</button><button class="btn quiet danger" id="delk2">${ic('trash', 16)}Elimina scheda</button></div>`;

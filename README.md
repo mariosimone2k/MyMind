@@ -32,3 +32,4 @@ Apri MyMind, scegli **"Ho già un backup: ripristina"**, seleziona il file da iC
 - Figtree e Newsreader: SIL Open Font License.
 - SheetJS Community Edition: Apache 2.0.
 - mammoth.js: BSD-2-Clause.
+- tesseract.js e tesseract.js-core: Apache 2.0. Dati linguistici Tesseract (italiano): Apache 2.0.

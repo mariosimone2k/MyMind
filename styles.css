@@ -482,3 +482,17 @@ dl.kv dd{margin:0;white-space:pre-line}
 .remind .ri{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;background:var(--accsoft);color:var(--accink)}
 ::selection{background:color-mix(in srgb,var(--acc) 30%,transparent)}
 @media(max-width:860px){.gate .art{display:none}}
+/* ---------- revisione palinsesto da foto ---------- */
+.rvl{max-height:52vh;overflow:auto;padding-right:2px}
+.rv{display:grid!important;grid-template-columns:24px minmax(0,1fr)!important;gap:6px 10px!important;align-items:start!important;background:var(--soft)}
+.rv.chk{background:var(--accsoft)}
+.rv-inc{padding-top:10px}.rv-inc input{width:18px;height:18px;accent-color:var(--brand)}
+.rv-g{display:grid;grid-template-columns:88px 96px minmax(0,1fr) minmax(0,1fr) 78px 64px;gap:6px}
+.rv-g .in{padding:7px 8px;font-size:14px;border-radius:8px;background:var(--paper)}
+.rv-raw{grid-column:2;color:var(--mute);font-size:12.5px;line-height:1.35}
+.rv-raw b{color:var(--accink)}
+@media(max-width:900px){.rv-g{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.rv-g{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) 76px}
+.rv-g [data-f=dayIdx]{order:1}.rv-g [data-f=start]{order:2}.rv-g [data-f=duration]{order:3}
+.rv-g [data-f=last]{order:4}.rv-g [data-f=first]{order:5}.rv-g [data-f=code]{order:6}
+@media(max-width:900px){.rv-g{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 70px}}
