@@ -4,7 +4,7 @@
    L'app non effettua alcuna connessione di rete (vedi Content-Security-Policy in index.html). */
 'use strict';
 (() => {
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -64,7 +64,7 @@ const P = {
  import:'<path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5"/><rect x="3.5" y="16" width="17" height="4.5" rx="1.5"/>'
 };
 const ic = (k, s = 20, w = 1.7) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[k]}</svg>`;
-const LOGO = `<svg viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#12403c"/><path d="M136 352V232c0-40 28-68 62-68s58 28 58 68v120M256 232c0-40 26-68 60-68s60 28 60 68v120" fill="none" stroke="#f4efe6" stroke-width="40" stroke-linecap="round"/><circle cx="256" cy="118" r="26" fill="#ee7350"/></svg>`;
+const LOGO = `<svg viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="120" fill="#432c50"/><g transform="translate(6 -14) scale(1.06) translate(-14 -2)"><path d="M256 392C196 346 150 262 186 140C262 178 300 282 256 392Z" fill="#f7e9ec"/><path d="M256 392C304 360 360 300 352 214C292 228 260 292 256 392Z" fill="#e8909d"/></g></svg>`;
 
 /* ============ crypto ============ */
 const ITER = 600000;
@@ -134,7 +134,7 @@ const idb = (() => {
 const TYPES = ['Seduta', 'Psicoterapia', 'Primo incontro', 'Colloquio clinico', 'Valutazione', 'Somministrazione test', 'Colloquio genitori', 'Restituzione', 'Sostituzione'];
 const blank = () => ({
   schema: 1,
-  settings: {name: '', title: 'Psicologa e psicoterapeuta', place: '', fee: 30, contrib: 2, bollo: true, duration: 50, autolock: 10, masked: false, remind: 7, lastBackup: 0, rooms: 'Stanza 1, Stanza 2, Stanza 3, Stanza 4'},
+  settings: {name: '', title: 'Psicologa e psicoterapeuta', place: '', fee: 30, contrib: 2, bollo: true, duration: 50, autolock: 10, masked: false, remind: 7, lastBackup: 0, snooze: 0, calDay: 5, calTime: '18:00', rooms: 'Stanza 1, Stanza 2, Stanza 3, Stanza 4'},
   kids: [], sessions: [], notes: [], invoices: {}, log: []
 });
 const kidById = id => D.kids.find(k => k.id === id);
@@ -181,8 +181,8 @@ const fval = (ov, id) => $('#' + id, ov).value.trim();
 function download(name, blob){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
 /* ============ gate: setup / unlock / restore ============ */
-const ART = `<div class="art"><svg class="rings" viewBox="0 0 400 400" fill="none" stroke="#f4efe6" stroke-width="1.5"><circle cx="200" cy="200" r="60"/><circle cx="200" cy="200" r="110"/><circle cx="200" cy="200" r="160"/><circle cx="200" cy="200" r="199"/></svg>
- <div class="logo" style="color:#f4efe6">${LOGO}MyMind</div>
+const ART = `<div class="art"><svg class="rings" viewBox="0 0 400 400" fill="none" stroke="#f7e9ec" stroke-width="1.5"><circle cx="200" cy="200" r="60"/><circle cx="200" cy="200" r="110"/><circle cx="200" cy="200" r="160"/><circle cx="200" cy="200" r="199"/></svg>
+ <div class="logo" style="color:#f7e9ec">${LOGO}MyMind</div>
  <div><h2>Il quaderno di lavoro per chi si prende cura dei bambini.</h2><p>Agenda, diario degli incontri, progressi e report per le famiglie in un unico posto ordinato.</p></div>
  <ul><li>${ic('lock', 20)}<span>I dati restano solo su questo dispositivo, cifrati con AES-256.</span></li><li>${ic('shield', 20)}<span>L'app non comunica con nessun server: la connessione è bloccata dal browser.</span></li><li>${ic('cloud', 20)}<span>Il backup cifrato va dove vuoi tu: iCloud Drive o Google Drive.</span></li></ul></div>`;
 function gate(html){ document.body.classList.add('gated'); $('#root').innerHTML = `<div class="gate">${ART}<div class="form"><div class="box">${html}</div></div></div>`; }
@@ -291,6 +291,7 @@ function startApp(){
   $('#lockBtn').onclick = lockNow; $('#lockBtn2').onclick = lockNow;
   lastAct = Date.now();
   route();
+  if(backupLate()) setTimeout(() => { if(D && !$('#ov')) backupReminder(); }, 1100);
 }
 function paintShell(cur){
   const toConfirm = D.sessions.filter(s => s.status === 'programmata' && (s.date < today() || (s.date === today() && tmin(s.start) + (s.duration || 50) < nowMin()))).length;
@@ -300,10 +301,11 @@ function paintShell(cur){
   paintBackupBox(); paintSaved();
 }
 function paintSaved(){ const el = $('#saved'); if(el) el.innerHTML = `${ic('lock', 14, 2)}Cifrato e salvato sul dispositivo`; }
-function backupLate(){ const st = D.settings; return !st.lastBackup || Date.now() - st.lastBackup > st.remind * 86400000; }
+function backupLate(){ const st = D.settings; if(st.snooze && st.snooze > Date.now()) return false; return !st.lastBackup || Date.now() - st.lastBackup > st.remind * 86400000; }
 function paintBackupBox(){
   const el = $('#bkbox'); if(!el) return; const late = backupLate();
-  el.innerHTML = `<div class="bk ${late ? 'late' : ''}"><b>${ic('cloud', 16, 2)}${late ? 'Backup da fare' : 'Backup aggiornato'}</b><span>Ultimo: ${ago(D.settings.lastBackup)}${folderHandle ? ' · automatico attivo' : ''}</span><button class="btn sm" id="bkNow">${ic('up', 16)}Salva backup</button></div>`;
+  const st2 = D.settings, old = !st2.lastBackup || Date.now() - st2.lastBackup > st2.remind * 86400000;
+  el.innerHTML = `<div class="bk ${late ? 'late' : ''}"><b>${ic('cloud', 16, 2)}${late ? 'Backup da fare' : old ? 'Backup rimandato a domani' : 'Backup aggiornato'}</b><span>Ultimo: ${ago(D.settings.lastBackup)}${folderHandle ? ' · automatico attivo' : ''}</span><button class="btn sm" id="bkNow">${ic('up', 16)}Salva backup</button></div>`;
   $('#bkNow').onclick = backupNow;
 }
 function route(){
@@ -763,24 +765,24 @@ function reportView(k){
 
 /* ============ GRAFICI PER LE FAMIGLIE ============ */
 const LEVEL = v => v >= 4.5 ? 'Raggiunto' : v >= 3.5 ? 'Quasi raggiunto' : v >= 2.5 ? 'In parte' : v >= 1.5 ? 'Con fatica' : 'Molto difficile';
-const PRINTC = ['#2c5687', '#8a5426', '#77407a', '#1f6469', '#93393f', '#77610f'];
+const PRINTC = ['#3b5a8f', '#8f5a32', '#7a4884', '#2a6a6e', '#a13f52', '#7a6417'];
 function dumbbell(k, ns, forPrint){
   const first = ns.find(n => k.goals.some(g => n.scores[g.id] != null)) || ns[0], last = ns[ns.length - 1];
   const pc = v => ((v - 1) / 4 * 100).toFixed(1);
   return `<div class="db ${forPrint ? 'print' : ''}"><div class="db-scale"><span></span><div>${[1, 2, 3, 4, 5].map(v => `<i style="left:${pc(v)}%">${v === 1 ? 'Molto difficile' : v === 3 ? 'In parte' : v === 5 ? 'Raggiunto' : ''}</i>`).join('')}</div><span></span></div>
    ${k.goals.map((g, j) => { const a = first.scores[g.id], b = last.scores[g.id]; if(a == null || b == null) return ''; const c = forPrint ? PRINTC[j % 6] : goalColor(j); const lo = Math.min(a, b), d = b - a;
     return `<div class="db-row" style="--c:${c};--i:${j}"><span class="db-l">${esc(g.label)}<small>${LEVEL(b)}</small></span><div class="db-t">${[1, 2, 3, 4, 5].map(v => `<u style="left:${pc(v)}%"></u>`).join('')}<i class="db-ln" style="left:${pc(lo)}%;width:${(Math.abs(d) / 4 * 100).toFixed(1)}%;${d < 0 ? 'transform-origin:right' : ''}"></i><b class="db-a" style="left:${pc(a)}%" title="All'inizio: ${fmtScore(a)}"></b><b class="db-b" style="left:${pc(b)}%" title="Oggi: ${fmtScore(b)}"></b></div><em class="db-d ${d > 0 ? 'up' : d < 0 ? 'dn' : ''}">${d > 0 ? '+' : ''}${fmtScore(Math.round(d * 2) / 2)}</em></div>`; }).join('')}
-   <div class="db-key"><span><b class="db-a"></b>All'inizio · ${fShort(first.date)}</span><span><b class="db-b" style="--c:${forPrint ? '#1f6469' : 'var(--brand)'}"></b>Oggi · ${fShort(last.date)}</span></div></div>`;
+   <div class="db-key"><span><b class="db-a"></b>All'inizio · ${fShort(first.date)}</span><span><b class="db-b" style="--c:${forPrint ? '#4b3158' : 'var(--brand)'}"></b>Oggi · ${fShort(last.date)}</span></div></div>`;
 }
 function areaChart(k, ns, forPrint){
   const pts = ns.map(n => { const v = k.goals.map(g => n.scores[g.id]).filter(x => x != null); return v.length ? {date: n.date, v: v.reduce((a, b) => a + b, 0) / v.length} : null; }).filter(Boolean);
   if(pts.length < 2) return '<div class="empty" style="padding:12px">Servono almeno due valutazioni.</div>';
-  const W = 600, H = 230, L = 34, R = 18, T = 16, B = 30, c = forPrint ? '#1f6469' : 'var(--brand)', gid = 'ag' + uid();
+  const W = 600, H = 230, L = 34, R = 18, T = 16, B = 30, c = forPrint ? '#4b3158' : 'var(--brand)', gid = 'ag' + uid();
   const x = i => L + (W - L - R) * i / (pts.length - 1), y = v => T + (H - T - B) * (5 - v) / 4;
   const P2 = pts.map((p, i) => [x(i), y(p.v)]);
   let d = `M${P2[0][0]},${P2[0][1]}`; for(let i = 1; i < P2.length; i++){ const [x0, y0] = P2[i - 1], [x1, y1] = P2[i], cx = (x0 + x1) / 2; d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`; }
   const area = `${d} L${P2[P2.length - 1][0]},${H - B} L${P2[0][0]},${H - B} Z`;
-  let g = `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${forPrint ? '#1f6469' : 'currentColor'}" stop-opacity=".28"/><stop offset="1" stop-color="${forPrint ? '#1f6469' : 'currentColor'}" stop-opacity="0"/></linearGradient></defs>`;
+  let g = `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${forPrint ? '#4b3158' : 'currentColor'}" stop-opacity=".28"/><stop offset="1" stop-color="${forPrint ? '#4b3158' : 'currentColor'}" stop-opacity="0"/></linearGradient></defs>`;
   [1, 2, 3, 4, 5].forEach(v => g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${forPrint ? '#eceae4' : 'var(--line2)'}"/><text x="${L - 10}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#8a9491">${v}</text>`);
   const months = []; pts.forEach((p, i) => { const mk = p.date.slice(0, 7); if(!months.find(m => m.mk === mk)) months.push({mk, i}); });
   months.forEach(m => g += `<text x="${x(m.i)}" y="${H - 8}" text-anchor="${m.i === 0 ? 'start' : 'middle'}" font-size="11" fill="#8a9491">${cap(MN[+m.mk.slice(5) - 1].slice(0, 3))}</text>`);
@@ -986,7 +988,8 @@ function vSettings(){
    <div class="opt"><div><b>Blocca ora</b><small>Chiude il quaderno su questo dispositivo</small></div><button class="btn sm" id="lk">${ic('lock', 15)}Blocca</button></div></div></section>
   <section class="set"><div><h2>Backup</h2><p>Un file cifrato che solo tu puoi aprire. Salvalo su iCloud Drive o Google Drive per ritrovare tutto su un nuovo dispositivo.</p></div><div>
    <div class="opt"><div><b>Salva backup</b><small>Ultimo backup: ${ago(st.lastBackup)}${st.lastBackup ? ' (' + new Date(st.lastBackup).toLocaleString('it-IT', {dateStyle: 'medium', timeStyle: 'short'}) + ')' : ''}</small></div><button class="btn sm pri" id="bk">${ic('up', 15)}Salva ora</button></div>
-   <div class="opt"><div><b>Promemoria</b><small>Ti ricorda di fare il backup</small></div><select class="in" id="s-remind" style="width:auto">${[[1, 'Ogni giorno'], [3, 'Ogni 3 giorni'], [7, 'Ogni settimana'], [14, 'Ogni 2 settimane']].map(([v, l]) => `<option value="${v}" ${+st.remind === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+   <div class="opt"><div><b>Promemoria nel calendario</b><small>Un evento che si ripete ogni settimana, con notifica, nel calendario del telefono</small></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><select class="in" id="s-calDay" style="width:auto">${[1, 2, 3, 4, 5, 6, 0].map(v => `<option value="${v}" ${+st.calDay === v ? 'selected' : ''}>${cap(DL[v])}</option>`).join('')}</select><input class="in" type="time" id="s-calTime" value="${st.calTime}" style="width:auto"><button class="btn sm" id="calAdd">${ic('cal', 15)}Aggiungi</button></div></div>
+   <div class="opt"><div><b>Promemoria nell'app</b><small>MyMind te lo ricorda quando lo apri</small></div><select class="in" id="s-remind" style="width:auto">${[[1, 'Ogni giorno'], [3, 'Ogni 3 giorni'], [7, 'Ogni settimana'], [14, 'Ogni 2 settimane']].map(([v, l]) => `<option value="${v}" ${+st.remind === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
    <div class="opt"><div><b>Backup automatico in una cartella</b><small>${'showSaveFilePicker' in window ? (folderHandle ? 'Attivo: ogni modifica aggiorna il file scelto' : 'Su computer: scegli un file nella cartella di iCloud Drive o Google Drive e verrà aggiornato da solo') : 'Disponibile su computer con Chrome o Edge. Su iPhone e Android usa "Salva ora".'}</small></div>${'showSaveFilePicker' in window ? `<button class="btn sm" id="af">${ic('folder', 15)}${folderHandle ? 'Disattiva' : 'Scegli file'}</button>` : ''}</div>
    <div class="opt"><div><b>Ripristina da backup</b><small>Sostituisce i dati di questo dispositivo con quelli del file</small></div><button class="btn sm" id="rs">${ic('down', 15)}Ripristina</button></div></div></section>
   <section class="set"><div><h2>Privacy</h2><p>Come sono protetti i dati.</p></div><div class="priv">
@@ -997,7 +1000,8 @@ function vSettings(){
    ${D.kids.length ? '' : `<div class="opt"><div><b>Dati di esempio</b><small>Carica alcuni bambini e incontri di prova</small></div><button class="btn sm" id="smp">Carica</button></div>`}
    <div class="opt"><div><b>Elimina tutti i dati</b><small>Cancella il quaderno da questo dispositivo. I backup già salvati non vengono toccati.</small></div><button class="btn sm danger" id="wipe">${ic('trash', 15)}Elimina</button></div></div></section></div>`;
   const bindIn = (id, key, num) => { const el = $('#' + id); el.onchange = () => { st[key] = el.type === 'checkbox' ? el.checked : num ? +el.value : el.value.trim(); save(); paintShell('impostazioni'); toast('Impostazione salvata'); }; };
-  bindIn('s-name', 'name'); bindIn('s-title', 'title'); bindIn('s-place', 'place'); bindIn('s-rooms', 'rooms'); bindIn('s-fee', 'fee', 1); bindIn('s-contrib', 'contrib', 1); bindIn('s-duration', 'duration', 1); bindIn('s-bollo', 'bollo'); bindIn('s-autolock', 'autolock', 1); bindIn('s-masked', 'masked'); bindIn('s-remind', 'remind', 1);
+  bindIn('s-name', 'name'); bindIn('s-title', 'title'); bindIn('s-place', 'place'); bindIn('s-rooms', 'rooms'); bindIn('s-fee', 'fee', 1); bindIn('s-contrib', 'contrib', 1); bindIn('s-duration', 'duration', 1); bindIn('s-bollo', 'bollo'); bindIn('s-autolock', 'autolock', 1); bindIn('s-masked', 'masked'); bindIn('s-remind', 'remind', 1); bindIn('s-calDay', 'calDay', 1); bindIn('s-calTime', 'calTime');
+  $('#calAdd').onclick = calendarReminder;
   $('#lk').onclick = lockNow; $('#bk').onclick = backupNow; $('#rs').onclick = restoreInApp;
   const af = $('#af'); if(af) af.onclick = async () => { if(folderHandle){ folderHandle = null; await idb.del('fh'); vSettings(); paintBackupBox(); toast('Backup automatico disattivato'); } else pickFolderFile(); };
   const smp = $('#smp'); if(smp) smp.onclick = () => { const s = sampleData(); Object.assign(D, {kids: s.kids, sessions: s.sessions, notes: s.notes}); log('Caricati i dati di esempio.'); save(); location.hash = 'oggi'; toast('Dati di esempio caricati'); };
@@ -1016,6 +1020,31 @@ function vSettings(){
       modal({title: 'La tua nuova chiave di recupero', sub: 'Conservala in un posto sicuro, lontano dal telefono.', width: 520, body: `<div class="reckey">${rec}</div>`, foot: `<button class="btn pri" data-close>L'ho conservata</button>`}); } catch(e){ $('#e', ov).innerHTML = '<div class="err">Password non corretta.</div>'; } }});
 }
 
+/* ============ PROMEMORIA BACKUP ============ */
+function backupReminder(){
+  const st = D.settings, days = st.lastBackup ? Math.floor((Date.now() - st.lastBackup) / 86400000) : null;
+  modal({title: 'È il momento del backup', width: 520,
+    body: `<div class="remind"><span class="ri">${ic('cloud', 26)}</span><div><p style="margin:0 0 8px;color:var(--ink2)">${days == null ? 'Non hai ancora salvato nessun backup.' : `L'ultimo backup risale a <b>${days} ${days === 1 ? 'giorno' : 'giorni'} fa</b>.`} Se perdi o cambi telefono, il backup è l'unico modo per ritrovare il tuo lavoro.</p><p style="margin:0;color:var(--mute);font-size:14px">Bastano due tocchi: salvalo su iCloud Drive o Google Drive. Il file è cifrato, solo tu puoi aprirlo.</p></div></div>
+     <button class="linkbtn" id="cal" style="margin-top:12px">${ic('cal', 16)} Aggiungi un promemoria settimanale al calendario</button>`,
+    foot: `<button class="btn" id="later">Ricordamelo domani</button><button class="btn pri" id="now">${ic('up', 17)}Salva backup ora</button>`,
+    onOpen: ov => {
+      $('#later', ov).onclick = () => { D.settings.snooze = Date.now() + 86400000; save(); closeModal(); paintBackupBox(); toast('Te lo ricordo domani'); };
+      $('#now', ov).onclick = () => { closeModal(); backupNow(); };
+      $('#cal', ov).onclick = () => calendarReminder();
+    }});
+}
+function calendarReminder(){
+  const st = D.settings, [hh, mm] = (st.calTime || '18:00').split(':').map(Number);
+  let d = new Date(); d.setHours(hh, mm, 0, 0); while(d.getDay() !== +st.calDay || d < new Date()) d = addDays(d, 1);
+  const f = x => `${x.getFullYear()}${pad(x.getMonth() + 1)}${pad(x.getDate())}T${pad(x.getHours())}${pad(x.getMinutes())}00`;
+  const z = new Date(), stampZ = `${z.getUTCFullYear()}${pad(z.getUTCMonth() + 1)}${pad(z.getUTCDate())}T${pad(z.getUTCHours())}${pad(z.getUTCMinutes())}00Z`;
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//MyMind//Promemoria//IT', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT', `UID:mymind-backup-${uid()}@mymind`, `DTSTAMP:${stampZ}`, `DTSTART:${f(d)}`, 'DURATION:PT10M', 'RRULE:FREQ=WEEKLY',
+    'SUMMARY:Backup di MyMind', 'DESCRIPTION:Apri MyMind e tocca "Salva backup"\\, poi scegli iCloud Drive o Google Drive. Ci vuole un minuto.', 'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:Backup di MyMind', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+  download('Promemoria-backup-MyMind.ics', new Blob([ics], {type: 'text/calendar;charset=utf-8'}));
+  log(`Promemoria settimanale del backup aggiunto al calendario (${DL[+st.calDay]} alle ${st.calTime}).`); save();
+  toast('Apri il file per aggiungerlo al calendario');
+}
+
 /* ============ BACKUP ============ */
 let folderHandle = null;
 const backupName = () => `MyMind-backup-${today()}.mymind`;
@@ -1029,7 +1058,7 @@ async function backupNow(){
     try { await navigator.share({files: [file], title: 'Backup MyMind'}); ok = true; } catch(e){ if(e.name === 'AbortError') return; }
   }
   if(!ok){ download(file.name, file); ok = true; }
-  D.settings.lastBackup = Date.now(); log('Backup cifrato salvato.'); await persist(); paintBackupBox();
+  D.settings.lastBackup = Date.now(); D.settings.snooze = 0; log('Backup cifrato salvato.'); await persist(); paintBackupBox();
   toast(isTouch ? 'Backup pronto: scegli iCloud Drive o Google Drive' : 'Backup scaricato: spostalo nella cartella iCloud o Google Drive');
   if(location.hash === '#impostazioni') vSettings(); else if(location.hash === '' || location.hash === '#oggi') vToday();
 }
