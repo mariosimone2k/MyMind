@@ -4,7 +4,7 @@
    L'app non effettua alcuna connessione di rete (vedi Content-Security-Policy in index.html). */
 'use strict';
 (() => {
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -59,6 +59,7 @@ const P = {
  trash:'<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
  sign:'<path d="M4 18c3-6 5-11 7-11s-1 9 1 9 3-4 4-4 1 3 4 3"/><path d="M4 21h16"/>',
  folder:'<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/>',
+ face:'<path d="M4 8V6.5A2.5 2.5 0 0 1 6.5 4H8M16 4h1.5A2.5 2.5 0 0 1 20 6.5V8M20 16v1.5a2.5 2.5 0 0 1-2.5 2.5H16M8 20H6.5A2.5 2.5 0 0 1 4 17.5V16"/><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9.5 15.5c1.5 1.2 3.5 1.2 5 0"/>',
  eye:'<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
  key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16.5 6.5l2.5 2.5M14 9l2 2"/>',
  import:'<path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5"/><rect x="3.5" y="16" width="17" height="4.5" rx="1.5"/>'
@@ -121,6 +122,36 @@ async function persist(){
   autoFolderBackup();
 }
 function save(){ if(!DEK) return; clearTimeout(dirty); dirty = setTimeout(() => persist().catch(e => toast('Errore di salvataggio: ' + e.message)), 250); }
+
+/* ============ Face ID / impronta (WebAuthn + PRF) ============ */
+const BIO_DAYS = 14;
+const bioLabel = () => /iPhone|iPad|Macintosh/.test(navigator.userAgent) ? 'Face ID' : 'impronta o volto';
+const bioAvailable = () => !!(window.PublicKeyCredential && navigator.credentials && location.protocol === 'https:' || (window.PublicKeyCredential && location.hostname === 'localhost'));
+async function prfKey(out){ const base = await crypto.subtle.importKey('raw', out, 'HKDF', false, ['deriveKey']); return crypto.subtle.deriveKey({name: 'HKDF', hash: 'SHA-256', salt: enc.encode('MyMind-bio-v1'), info: enc.encode('wrap')}, base, {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']); }
+async function bioEnable(rawDek){
+  const salt = rand(32), host = location.hostname;
+  const cred = await navigator.credentials.create({publicKey: {rp: {name: 'MyMind', id: host}, user: {id: rand(16), name: 'MyMind', displayName: (D.settings.name || 'MyMind')}, challenge: rand(32),
+    pubKeyCredParams: [{type: 'public-key', alg: -7}, {type: 'public-key', alg: -257}], authenticatorSelection: {authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'required'}, timeout: 60000,
+    extensions: {prf: {eval: {first: salt}}}}});
+  const ext = cred.getClientExtensionResults ? cred.getClientExtensionResults() : {};
+  if(!ext.prf || ext.prf.enabled === false) throw new Error('noprf');
+  let out = ext.prf.results && ext.prf.results.first;
+  if(!out){ const a = await navigator.credentials.get({publicKey: {challenge: rand(32), rpId: host, allowCredentials: [{type: 'public-key', id: cred.rawId}], userVerification: 'required', timeout: 60000, extensions: {prf: {eval: {first: salt}}}}});
+    const e2 = a.getClientExtensionResults(); out = e2.prf && e2.prf.results && e2.prf.results.first; }
+  if(!out) throw new Error('noprf');
+  const wrap = await seal(await prfKey(out), rawDek);
+  await idb.set('bio', {id: b64(cred.rawId), salt: b64(salt), wrap, pwAt: Date.now()});
+}
+async function bioUnlock(env){
+  const bio = await idb.get('bio');
+  const a = await navigator.credentials.get({publicKey: {challenge: rand(32), rpId: location.hostname, allowCredentials: [{type: 'public-key', id: unb64(bio.id)}], userVerification: 'required', timeout: 60000, extensions: {prf: {eval: {first: unb64(bio.salt)}}}}});
+  const e = a.getClientExtensionResults(); const out = e.prf && e.prf.results && e.prf.results.first;
+  if(!out) throw new Error('noprf');
+  const raw = await open_(await prfKey(out), bio.wrap);
+  const dk = await importDek(raw);
+  return {dk, data: JSON.parse(dec.decode(await open_(dk, env.data)))};
+}
+async function bioTouchPw(){ try { const b = await idb.get('bio'); if(b){ b.pwAt = Date.now(); await idb.set('bio', b); } } catch(e){} }
 
 /* ============ IndexedDB ============ */
 const idb = (() => {
@@ -228,13 +259,19 @@ function viewRecovery(rec, first){
   $('#pr').onclick = () => { $('#print').innerHTML = `<div class="paper"><div class="hd"><div><b>MyMind</b>Chiave di recupero</div><div>${fFull(today())}</div></div><h3>Chiave di recupero</h3><p class="m">Conserva questo foglio in un luogo sicuro. Serve solo se dimentichi la password.</p><p style="font:600 22px ui-monospace,Menlo,monospace;letter-spacing:.05em;margin:24px 0">${rec}</p></div>`; print(); };
   $('#go').onclick = () => { startApp(); if(first) setTimeout(() => toast('Benvenuta in MyMind'), 300); };
 }
-function viewUnlock(env){
-  gate(`<div class="logo">${LOGO}MyMind</div><h1>Bentornata</h1><p class="sub">Inserisci la password per aprire il quaderno.</p><div id="err"></div>
-  <form id="f"><label class="fld"><span>Password</span><input class="in" id="pw" type="password" autocomplete="current-password" autofocus></label><button class="btn pri block" id="go">Apri</button></form>
+async function viewUnlock(env){
+  let bio = null; try { bio = await idb.get('bio'); } catch(e){}
+  const bioOk = bio && bioAvailable(), bioExpired = bioOk && Date.now() - (bio.pwAt || 0) > BIO_DAYS * 86400000;
+  gate(`<div class="logo">${LOGO}MyMind</div><h1>Bentornata</h1><p class="sub">${bioOk && !bioExpired ? `Usa ${bioLabel()} per aprire il quaderno.` : bioExpired ? `Per sicurezza, ogni ${BIO_DAYS} giorni ti chiediamo la password.` : 'Inserisci la password per aprire il quaderno.'}</p><div id="err"></div>
+  ${bioOk && !bioExpired ? `<button class="btn pri block" id="bio" style="min-height:54px;font-size:16px;margin-bottom:18px">${ic('face', 22)}Sblocca con ${bioLabel()}</button><p style="text-align:center;color:var(--mute);font-size:13px;margin:-6px 0 14px">oppure usa la password</p>` : ''}
+  <form id="f"><label class="fld"><span>Password</span><input class="in" id="pw" type="password" autocomplete="current-password" ${bioOk && !bioExpired ? '' : 'autofocus'}></label><button class="btn ${bioOk && !bioExpired ? '' : 'pri'} block" id="go">Apri</button></form>
   <div class="alt"><button class="linkbtn" id="rc">Ho dimenticato la password</button><button class="linkbtn" id="rs">Ripristina da un backup</button></div>`);
-  setTimeout(() => $('#pw') && $('#pw').focus(), 50);
+  if(!(bioOk && !bioExpired)) setTimeout(() => $('#pw') && $('#pw').focus(), 50);
+  const bb = $('#bio'); if(bb) bb.onclick = async () => { bb.disabled = true;
+    try { const r = await bioUnlock(env); ENV = env; DEK = r.dk; D = migrate(r.data); startApp(); }
+    catch(x){ bb.disabled = false; $('#err').innerHTML = `<div class="err">${x.name === 'NotAllowedError' ? 'Sblocco annullato. Riprova o usa la password.' : 'Sblocco non riuscito: usa la password.'}</div>`; } };
   $('#f').onsubmit = async e => { e.preventDefault(); const b = $('#go'); b.disabled = true; b.textContent = 'Apertura…';
-    try { const r = await unlockWith(env, $('#pw').value, false); ENV = env; DEK = r.dk; D = migrate(r.data); startApp(); }
+    try { const r = await unlockWith(env, $('#pw').value, false); ENV = env; DEK = r.dk; D = migrate(r.data); bioTouchPw(); startApp(); }
     catch(x){ b.disabled = false; b.textContent = 'Apri'; $('#err').innerHTML = '<div class="err">Password non corretta.</div>'; $('#pw').select(); } };
   $('#rc').onclick = () => viewForgot(env);
   $('#rs').onclick = viewRestore;
@@ -1003,6 +1040,7 @@ function vSettings(){
   <section class="set"><div><h2>Sicurezza</h2><p>Protezioni del quaderno su questo dispositivo.</p></div><div>
    <div class="opt"><div><b>Blocco automatico</b><small>Richiede la password dopo un periodo di inattività</small></div><select class="in" id="s-autolock" style="width:auto">${[[1, '1 minuto'], [5, '5 minuti'], [10, '10 minuti'], [30, '30 minuti'], [0, 'Mai']].map(([v, l]) => `<option value="${v}" ${+st.autolock === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
    <div class="opt"><div><b>Modalità riservata</b><small>Mostra solo le iniziali dei bambini, utile quando lo schermo è visibile ad altri</small></div>${sw('s-masked', st.masked)}</div>
+   <div class="opt"><div><b>Sblocco con Face ID o impronta</b><small id="bioInfo">Apri il quaderno con il volto o il dito. Ogni ${BIO_DAYS} giorni viene chiesta comunque la password.</small></div><button class="btn sm" id="bioBtn">${ic('face', 15)}<span>Attiva</span></button></div>
    <div class="opt"><div><b>Password</b><small>Cambiala quando vuoi: serve la password attuale</small></div><button class="btn sm" id="chpw">${ic('key', 15)}Cambia password</button></div>
    <div class="opt"><div><b>Chiave di recupero</b><small>Generane una nuova se temi che quella vecchia sia stata vista</small></div><button class="btn sm" id="nrk">${ic('key', 15)}Nuova chiave</button></div>
    <div class="opt"><div><b>Blocca ora</b><small>Chiude il quaderno su questo dispositivo</small></div><button class="btn sm" id="lk">${ic('lock', 15)}Blocca</button></div></div></section>
@@ -1023,11 +1061,21 @@ function vSettings(){
   bindIn('s-name', 'name'); bindIn('s-title', 'title'); bindIn('s-place', 'place'); bindIn('s-rooms', 'rooms'); bindIn('s-fee', 'fee', 1); bindIn('s-contrib', 'contrib', 1); bindIn('s-duration', 'duration', 1); bindIn('s-bollo', 'bollo'); bindIn('s-autolock', 'autolock', 1); bindIn('s-masked', 'masked'); bindIn('s-remind', 'remind', 1); bindIn('s-calDay', 'calDay', 1); bindIn('s-calTime', 'calTime');
   $('#calAdd').onclick = calendarReminder;
   $('#lk').onclick = lockNow; $('#bk').onclick = backupNow; $('#rs').onclick = restoreInApp;
+  (async () => { const bb = $('#bioBtn'); if(!bb) return; const have = await idb.get('bio').catch(() => null);
+    if(!bioAvailable()){ bb.disabled = true; $('#bioInfo').textContent = 'Non disponibile su questo browser.'; return; }
+    bb.querySelector('span').textContent = have ? 'Disattiva' : 'Attiva'; if(have) $('#bioInfo').textContent = 'Attivo su questo dispositivo.';
+    bb.onclick = () => have ? (async () => { await idb.del('bio'); log('Sblocco biometrico disattivato.'); save(); vSettings(); toast('Sblocco biometrico disattivato'); })()
+      : modal({title: 'Attiva lo sblocco con ' + bioLabel(), sub: 'Per sicurezza conferma la password. Poi il telefono ti chiederà ' + bioLabel() + '.', width: 460,
+        body: `<div id="e"></div><label class="fld"><span>Password</span><input class="in" type="password" id="p0" autocomplete="current-password"></label>`, foot: `<button class="btn" data-close>Annulla</button><button class="btn pri" id="ok">Continua</button>`,
+        onOpen: ov => $('#ok', ov).onclick = async () => { let raw;
+          try { raw = await open_(await kek($('#p0', ov).value, unb64(ENV.saltPw), ENV.iter), ENV.wrapPw); } catch(e){ $('#e', ov).innerHTML = '<div class="err">Password non corretta.</div>'; return; }
+          try { await bioEnable(raw); log('Sblocco con ' + bioLabel() + ' attivato.'); save(); closeModal(); vSettings(); toast('Sblocco con ' + bioLabel() + ' attivo'); }
+          catch(e){ $('#e', ov).innerHTML = `<div class="err">${e.message === 'noprf' ? 'Questo dispositivo non permette lo sblocco biometrico per le app web. Serve iPhone con iOS 18 o successivo, oppure un Android recente con Chrome.' : e.name === 'NotAllowedError' ? 'Operazione annullata.' : 'Non è stato possibile attivarlo: ' + esc(e.message)}</div>`; } }}); })();
   const af = $('#af'); if(af) af.onclick = async () => { if(folderHandle){ folderHandle = null; await idb.del('fh'); vSettings(); paintBackupBox(); toast('Backup automatico disattivato'); } else pickFolderFile(); };
   const smp = $('#smp'); if(smp) smp.onclick = () => { const s = sampleData(); Object.assign(D, {kids: s.kids, sessions: s.sessions, notes: s.notes}); log('Caricati i dati di esempio.'); save(); location.hash = 'oggi'; toast('Dati di esempio caricati'); };
   $('#wipe').onclick = () => modal({title: 'Eliminare tutti i dati?', sub: 'Il quaderno verrà cancellato da questo dispositivo. Non si può annullare.', width: 460,
     body: `<label class="fld"><span>Per confermare scrivi ELIMINA</span><input class="in" id="cw" autocomplete="off"></label>`, foot: `<button class="btn" data-close>Annulla</button><button class="btn acc" id="ok">Elimina definitivamente</button>`,
-    onOpen: ov => $('#ok', ov).onclick = async () => { if($('#cw', ov).value.trim().toUpperCase() !== 'ELIMINA'){ toast('Scrivi ELIMINA per confermare'); return; } clearTimeout(dirty); await idb.del('vault'); await idb.del('fh'); DEK = null; D = null; ENV = null; folderHandle = null; closeModal(); boot(); }});
+    onOpen: ov => $('#ok', ov).onclick = async () => { if($('#cw', ov).value.trim().toUpperCase() !== 'ELIMINA'){ toast('Scrivi ELIMINA per confermare'); return; } clearTimeout(dirty); await idb.del('vault'); await idb.del('fh'); await idb.del('bio'); DEK = null; D = null; ENV = null; folderHandle = null; closeModal(); boot(); }});
   $('#chpw').onclick = () => modal({title: 'Cambia password', width: 480,
     body: `<div id="e"></div><label class="fld"><span>Password attuale</span><input class="in" type="password" id="p0" autocomplete="current-password"></label><label class="fld"><span>Nuova password</span><input class="in" type="password" id="p1" autocomplete="new-password"><div class="meter"><i id="mb"></i></div><small id="ml"></small></label><label class="fld"><span>Ripeti la nuova password</span><input class="in" type="password" id="p2" autocomplete="new-password"></label>`,
     foot: `<button class="btn" data-close>Annulla</button><button class="btn pri" id="ok">Cambia</button>`,
